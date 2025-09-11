@@ -98,8 +98,8 @@ The server provides integration with multiple Nextcloud apps, enabling LLMs to i
 
 1.  Clone the repository:
     ```bash
-    git clone https://github.com/your-username/nextcloud-mcp-server.git
-    cd nextcloud-mcp-server
+    git clone https://github.com/hithereiamaliff/mcp-nextcloud.git
+    cd mcp-nextcloud
     ```
 
 2.  Install dependencies:
@@ -229,7 +229,7 @@ This project includes full Smithery support with:
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0) - see the [LICENSE](LICENSE) file for details.
 
 ## Acknowledgments
 
