@@ -1,5 +1,7 @@
 # Nextcloud MCP Server
 
+[![smithery badge](https://smithery.ai/badge/@hithereiamaliff/mcp-nextcloud)](https://smithery.ai/server/@hithereiamaliff/mcp-nextcloud)
+
 > **Note:** This project is a complete rewrite in TypeScript of the original Python-based [cbcoutinho/nextcloud-mcp-server](https://github.com/cbcoutinho/nextcloud-mcp-server), now with **Smithery deployment support** for one-click cloud deployment.
 >
 > ### Key Differences from the Original Repository:
