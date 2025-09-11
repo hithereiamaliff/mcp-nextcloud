@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { initializeClients } from './utils/client-manager.js';
+import { setCredentials } from './utils/client-manager.js';
 
 // Import tool registration functions
 import { registerNotesTools } from './tools/notes.tools.js';
@@ -40,7 +40,7 @@ export default function createStatelessServer({
     version: '1.0.0',
   });
 
-  // Initialize clients with config
+  // Set credentials for lazy initialization (don't initialize clients yet)
   const {
     NEXTCLOUD_HOST,
     NEXTCLOUD_USERNAME,
@@ -52,11 +52,10 @@ export default function createStatelessServer({
   const username = config.nextcloudUsername || NEXTCLOUD_USERNAME;
   const password = config.nextcloudPassword || NEXTCLOUD_PASSWORD;
 
-  if (!host || !username || !password) {
-    throw new Error('Missing Nextcloud credentials in environment variables or config');
+  // Only set credentials if they exist, don't throw error during server initialization
+  if (host && username && password) {
+    setCredentials(host, username, password);
   }
-
-  initializeClients(host, username, password);
 
   // Register all tool sets
   const toolSets: ToolRegistrationFn[] = [
