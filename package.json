@@ -1,0 +1,45 @@
+{
+  "name": "mcp-nextcloud",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "module": "src/index.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "start": "ts-node src/app.ts",
+    "tunnel": "npx localtunnel --port 3000",
+    "open": "node open.js",
+    "dev": "npx @smithery/cli@1.2.14 dev",
+    "deploy": "npm run build && npx @smithery/cli@1.2.14 deploy"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hithereiamaliff/mcp-nextcloud.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/hithereiamaliff/mcp-nextcloud/issues"
+  },
+  "homepage": "https://github.com/hithereiamaliff/mcp-nextcloud#readme",
+  "description": "",
+  "devDependencies": {
+    "@smithery/cli": "^1.2.16",
+    "@types/node": "^24.3.1",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.7.0",
+    "typescript": "^5.9.2"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.17.4",
+    "axios": "^1.11.0",
+    "dotenv": "^16.4.5",
+    "localtunnel": "^2.0.2",
+    "npm-run-all": "^4.1.5",
+    "ts-node-dev": "^2.0.0",
+    "zod": "^3.25.57"
+  }
+}

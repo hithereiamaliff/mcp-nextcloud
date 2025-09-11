@@ -1,0 +1,6 @@
+{
+  "name": "@modelcontextprotocol/sdk",
+  "version": "1.17.4",
+  "main": "dist/index.js",
+  "types": "dist/types.d.ts"
+}
