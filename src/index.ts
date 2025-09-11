@@ -17,13 +17,10 @@ type ToolRegistrationFn = (server: McpServer) => void;
 // Define the config schema
 export const configSchema = z.object({
   nextcloudHost: z.string()
-    .optional()
     .describe('Nextcloud server URL (e.g., https://cloud.example.com)'),
   nextcloudUsername: z.string()
-    .optional()
     .describe('Nextcloud username for authentication'),
   nextcloudPassword: z.string()
-    .optional()
     .describe('Nextcloud password for authentication'),
 });
 
