@@ -1,7 +1,8 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { getClient } from '../index.js';
+import { getClient } from '../utils/client-manager.js';
 import { NotesClient } from '../client/notes.js';
+import { prefixToolName } from '../utils/tool-naming.js';
 
 /**
  * Register Notes tools with the MCP server
@@ -9,7 +10,7 @@ import { NotesClient } from '../client/notes.js';
  */
 export function registerNotesTools(server: McpServer) {
   server.tool(
-    'nc_notes_create_note',
+    prefixToolName('notes_create_note'),
     'Create a new note in Nextcloud Notes',
     {
       title: z.string().describe('The title of the note'),
@@ -35,7 +36,7 @@ export function registerNotesTools(server: McpServer) {
   );
 
   server.tool(
-    'nc_notes_update_note',
+    prefixToolName('notes_update_note'),
     'Update an existing note in Nextcloud Notes',
     {
       note_id: z.number().describe('The ID of the note to update'),
@@ -63,7 +64,7 @@ export function registerNotesTools(server: McpServer) {
   );
 
   server.tool(
-    'nc_notes_append_content',
+    prefixToolName('notes_append_content'),
     'Append content to an existing note',
     {
       note_id: z.number().describe('The ID of the note to append to'),
@@ -95,7 +96,7 @@ export function registerNotesTools(server: McpServer) {
   );
 
   server.tool(
-    'nc_notes_search_notes',
+    prefixToolName('notes_search_notes'),
     'Search for notes in Nextcloud Notes',
     {
       query: z.string().describe('The search query'),
@@ -126,7 +127,7 @@ export function registerNotesTools(server: McpServer) {
   );
 
   server.tool(
-    'nc_notes_delete_note',
+    prefixToolName('notes_delete_note'),
     'Delete a note from Nextcloud Notes',
     {
       note_id: z.number().describe('The ID of the note to delete'),

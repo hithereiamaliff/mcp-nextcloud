@@ -1,7 +1,8 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { getClient } from '../index.js';
+import { getClient } from '../utils/client-manager.js';
 import { TablesClient } from '../client/tables.js';
+import { prefixToolName } from '../utils/tool-naming.js';
 
 /**
  * Register Tables tools with the MCP server
@@ -9,7 +10,7 @@ import { TablesClient } from '../client/tables.js';
  */
 export function registerTablesTools(server: McpServer) {
   server.tool(
-    'nc_tables_list_tables',
+    prefixToolName('tables_list_tables'),
     'List all tables in Nextcloud Tables',
     {},
     async () => {
@@ -26,7 +27,7 @@ export function registerTablesTools(server: McpServer) {
   );
 
   server.tool(
-    'nc_tables_get_schema',
+    prefixToolName('tables_get_schema'),
     'Get schema of a specific table',
     {
       tableId: z.string().describe('The ID of the table'),
@@ -45,7 +46,7 @@ export function registerTablesTools(server: McpServer) {
   );
 
   server.tool(
-    'nc_tables_read_table',
+    prefixToolName('tables_read_table'),
     'Read data from a table',
     {
       tableId: z.string().describe('The ID of the table'),
@@ -64,7 +65,7 @@ export function registerTablesTools(server: McpServer) {
   );
 
   server.tool(
-    'nc_tables_insert_row',
+    prefixToolName('tables_insert_row'),
     'Insert a new row into a table',
     {
       tableId: z.string().describe('The ID of the table'),
@@ -84,7 +85,7 @@ export function registerTablesTools(server: McpServer) {
   );
 
   server.tool(
-    'nc_tables_update_row',
+    prefixToolName('tables_update_row'),
     'Update an existing row in a table',
     {
       tableId: z.string().describe('The ID of the table'),
@@ -105,7 +106,7 @@ export function registerTablesTools(server: McpServer) {
   );
 
   server.tool(
-    'nc_tables_delete_row',
+    prefixToolName('tables_delete_row'),
     'Delete a row from a table',
     {
       tableId: z.string().describe('The ID of the table'),

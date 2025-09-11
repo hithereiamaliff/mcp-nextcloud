@@ -1,7 +1,8 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { getClient } from '../index.js';
+import { getClient } from '../utils/client-manager.js';
 import { CalendarClient } from '../client/calendar.js';
+import { prefixToolName } from '../utils/tool-naming.js';
 
 /**
  * Register Calendar tools with the MCP server
@@ -9,7 +10,7 @@ import { CalendarClient } from '../client/calendar.js';
  */
 export function registerCalendarTools(server: McpServer) {
   server.tool(
-    'nc_calendar_list_calendars',
+    prefixToolName('calendar_list_calendars'),
     'List all calendars in Nextcloud',
     {},
     async () => {
@@ -26,7 +27,7 @@ export function registerCalendarTools(server: McpServer) {
   );
 
   server.tool(
-    'nc_calendar_create_event',
+    prefixToolName('calendar_create_event'),
     'Create a new calendar event',
     {
       calendarId: z.string().describe('The ID of the calendar'),
@@ -52,7 +53,7 @@ export function registerCalendarTools(server: McpServer) {
   );
 
   server.tool(
-    'nc_calendar_list_events',
+    prefixToolName('calendar_list_events'),
     'List events from a calendar',
     {
       calendarId: z.string().describe('The ID of the calendar'),
@@ -73,7 +74,7 @@ export function registerCalendarTools(server: McpServer) {
   );
 
   server.tool(
-    'nc_calendar_get_event',
+    prefixToolName('calendar_get_event'),
     'Get details of a specific event',
     {
       calendarId: z.string().describe('The ID of the calendar'),
@@ -93,7 +94,7 @@ export function registerCalendarTools(server: McpServer) {
   );
 
   server.tool(
-    'nc_calendar_update_event',
+    prefixToolName('calendar_update_event'),
     'Update an existing event',
     {
       calendarId: z.string().describe('The ID of the calendar'),
@@ -120,7 +121,7 @@ export function registerCalendarTools(server: McpServer) {
   );
 
   server.tool(
-    'nc_calendar_delete_event',
+    prefixToolName('calendar_delete_event'),
     'Delete an event from calendar',
     {
       calendarId: z.string().describe('The ID of the calendar'),
