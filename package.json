@@ -4,6 +4,7 @@
   "description": "A Model Context Protocol (MCP) server for Nextcloud integration, providing 30+ tools for Notes, Calendar, Contacts, Tables, and WebDAV operations with advanced unified search capabilities",
   "type": "module",
   "main": "dist/index.js",
+  "module": "./src/index.ts",
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
