@@ -15,7 +15,7 @@ The Nextcloud MCP (Model Context Protocol) server allows Large Language Models (
 
 ## Features
 
-The server provides integration with multiple Nextcloud apps, enabling LLMs to interact with your Nextcloud data through a comprehensive set of **29 tools** across 5 main categories.
+The server provides integration with multiple Nextcloud apps, enabling LLMs to interact with your Nextcloud data through a comprehensive set of **30 tools** across 5 main categories.
 
 ## Supported Nextcloud Apps
 
@@ -72,15 +72,79 @@ The server provides integration with multiple Nextcloud apps, enabling LLMs to i
 | `nc_tables_update_row` | Update an existing row in a table |
 | `nc_tables_delete_row` | Delete a row from a table |
 
-### 📁 WebDAV File System Tools (5 tools)
+### 📁 WebDAV File System Tools (6 tools)
 
 | Tool | Description |
 |------|-------------|
+| `nc_webdav_search_files` | **NEW!** Unified search across filenames, content, and metadata - no need to specify exact paths |
 | `nc_webdav_list_directory` | List files and directories in any Nextcloud path |
 | `nc_webdav_read_file` | Read file content from Nextcloud |
 | `nc_webdav_write_file` | Create or update files in Nextcloud with content |
 | `nc_webdav_create_directory` | Create new directories in Nextcloud |
 | `nc_webdav_delete_resource` | Delete files or directories from Nextcloud |
+
+## 🔍 New Unified WebDAV Search Feature
+
+The latest addition to the MCP server is the powerful **unified search system** for WebDAV files, inspired by modern search interfaces. This eliminates the need to specify exact file paths and enables natural language search across your Nextcloud files.
+
+### Key Features
+
+- **Multi-scope Search**: Search across filenames, file content, and metadata simultaneously
+- **Smart File Type Detection**: Automatically handles text files, code, configuration files, documents, and media
+- **Advanced Filtering**: Filter by file type, size range, modification date, and directory
+- **Intelligent Ranking**: Results ranked by relevance with bonuses for recent files and exact matches
+- **Content Preview**: Optional content previews for matched text files
+- **Performance Optimized**: Intelligent caching, lazy loading, and parallel processing
+
+### Search Examples
+
+```typescript
+// Basic search - find all files containing "budget"
+await nc_webdav_search_files({
+  query: "budget"
+});
+
+// Advanced search - find PDF reports from 2024
+await nc_webdav_search_files({
+  query: "report 2024",
+  fileTypes: ["pdf"],
+  searchIn: ["filename", "content"],
+  limit: 20,
+  includeContent: true
+});
+
+// Directory-specific search with date range
+await nc_webdav_search_files({
+  query: "meeting notes",
+  basePath: "/Documents",
+  searchIn: ["filename", "content"],
+  dateRange: {
+    from: "2024-01-01",
+    to: "2024-12-31"
+  }
+});
+
+// Search by file characteristics
+await nc_webdav_search_files({
+  query: "large files",
+  sizeRange: { min: 10485760 }, // Files larger than 10MB
+  fileTypes: ["pdf", "mp4", "zip"]
+});
+```
+
+### Search Parameters
+
+| Parameter | Type | Description | Example |
+|-----------|------|-------------|---------|
+| `query` | string | Search terms (required) | `"budget report"` |
+| `searchIn` | array | Where to search: `filename`, `content`, `metadata` | `["filename", "content"]` |
+| `fileTypes` | array | File extensions to include | `["pdf", "txt", "md"]` |
+| `basePath` | string | Directory to search in | `"/Documents"` |
+| `limit` | number | Max results (default: 50) | `20` |
+| `includeContent` | boolean | Include content previews | `true` |
+| `caseSensitive` | boolean | Case-sensitive matching | `false` |
+| `sizeRange` | object | File size filters | `{min: 1024, max: 1048576}` |
+| `dateRange` | object | Date range filters | `{from: "2024-01-01", to: "2024-12-31"}` |
 
 ### 🧪 Test Tool (1 tool)
 
