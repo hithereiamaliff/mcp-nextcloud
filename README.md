@@ -27,94 +27,96 @@ The server provides integration with multiple Nextcloud apps, enabling LLMs to i
 | **Files (WebDAV)** | ✅ Full Support | Complete file system access - browse directories, read/write files, create/delete resources. |
 | **Contacts** | ✅ Full Support | Create, read, update, and delete contacts and address books via CardDAV. |
 
-## Available Tools (29 Total)
+## Available Tools (30 Total)
 
 ### 📝 Notes Tools (5 tools)
 
 | Tool | Description |
 |------|-------------|
-| `nc_notes_create_note` | Create a new note with title, content, and category |
-| `nc_notes_update_note` | Update an existing note by ID with optional title, content, or category |
-| `nc_notes_append_content` | Append content to an existing note with a clear separator |
-| `nc_notes_search_notes` | Search notes by title or content with result filtering |
-| `nc_notes_delete_note` | Delete a note by ID |
+| `nextcloud_notes_create_note` | Create a new note with title, content, and category |
+| `nextcloud_notes_update_note` | Update an existing note by ID with optional title, content, or category |
+| `nextcloud_notes_append_content` | Append content to an existing note with a clear separator |
+| `nextcloud_notes_search_notes` | Search notes by title or content with result filtering |
+| `nextcloud_notes_delete_note` | Delete a note by ID |
 
 ### 📅 Calendar Tools (6 tools)
 
 | Tool | Description |
 |------|-------------|
-| `nc_calendar_list_calendars` | List all available calendars for the user |
-| `nc_calendar_create_event` | Create a calendar event with summary, description, dates, and location |
-| `nc_calendar_list_events` | List events from a calendar with optional date filtering |
-| `nc_calendar_get_event` | Get detailed information about a specific event |
-| `nc_calendar_update_event` | Update any aspect of an existing event |
-| `nc_calendar_delete_event` | Delete a calendar event |
+| `nextcloud_calendar_list_calendars` | List all available calendars for the user |
+| `nextcloud_calendar_create_event` | Create a calendar event with summary, description, dates, and location |
+| `nextcloud_calendar_list_events` | List events from a calendar with optional date filtering |
+| `nextcloud_calendar_get_event` | Get detailed information about a specific event |
+| `nextcloud_calendar_update_event` | Update any aspect of an existing event |
+| `nextcloud_calendar_delete_event` | Delete a calendar event |
 
 ### 👥 Contacts Tools (6 tools)
 
 | Tool | Description |
 |------|-------------|
-| `nc_contacts_list_addressbooks` | List all available addressbooks for the user |
-| `nc_contacts_create_addressbook` | Create a new addressbook with display name and description |
-| `nc_contacts_delete_addressbook` | Delete an addressbook by ID |
-| `nc_contacts_list_contacts` | List all contacts in a specific addressbook |
-| `nc_contacts_create_contact` | Create a new contact with full name, emails, phones, addresses, and organizations |
-| `nc_contacts_delete_contact` | Delete a contact from an addressbook |
+| `nextcloud_contacts_list_addressbooks` | List all available addressbooks for the user |
+| `nextcloud_contacts_create_addressbook` | Create a new addressbook with display name and description |
+| `nextcloud_contacts_delete_addressbook` | Delete an addressbook by ID |
+| `nextcloud_contacts_list_contacts` | List all contacts in a specific addressbook |
+| `nextcloud_contacts_create_contact` | Create a new contact with full name, emails, phones, addresses, and organizations |
+| `nextcloud_contacts_delete_contact` | Delete a contact from an addressbook |
 
 ### 📊 Tables Tools (6 tools)
 
 | Tool | Description |
 |------|-------------|
-| `nc_tables_list_tables` | List all tables available to the user |
-| `nc_tables_get_schema` | Get the schema/structure of a specific table including columns |
-| `nc_tables_read_table` | Read all rows from a table |
-| `nc_tables_insert_row` | Insert a new row into a table with key-value data |
-| `nc_tables_update_row` | Update an existing row in a table |
-| `nc_tables_delete_row` | Delete a row from a table |
+| `nextcloud_tables_list_tables` | List all tables available to the user |
+| `nextcloud_tables_get_schema` | Get the schema/structure of a specific table including columns |
+| `nextcloud_tables_read_table` | Read all rows from a table |
+| `nextcloud_tables_insert_row` | Insert a new row into a table with key-value data |
+| `nextcloud_tables_update_row` | Update an existing row in a table |
+| `nextcloud_tables_delete_row` | Delete a row from a table |
 
 ### 📁 WebDAV File System Tools (6 tools)
 
 | Tool | Description |
 |------|-------------|
-| `nc_webdav_search_files` | **NEW!** Unified search across filenames, content, and metadata - no need to specify exact paths |
-| `nc_webdav_list_directory` | List files and directories in any Nextcloud path |
-| `nc_webdav_read_file` | Read file content from Nextcloud |
-| `nc_webdav_write_file` | Create or update files in Nextcloud with content |
-| `nc_webdav_create_directory` | Create new directories in Nextcloud |
-| `nc_webdav_delete_resource` | Delete files or directories from Nextcloud |
+| `nextcloud_webdav_search_files` | **🔍 NEW!** Unified search across filenames, content, and metadata - no need to specify exact paths |
+| `nextcloud_webdav_list_directory` | List files and directories in any Nextcloud path |
+| `nextcloud_webdav_read_file` | Read file content from Nextcloud |
+| `nextcloud_webdav_write_file` | Create or update files in Nextcloud with content |
+| `nextcloud_webdav_create_directory` | Create new directories in Nextcloud |
+| `nextcloud_webdav_delete_resource` | Delete files or directories from Nextcloud |
 
-## 🔍 New Unified WebDAV Search Feature
+## 🔍 Revolutionary Unified WebDAV Search Feature
 
-The latest addition to the MCP server is the powerful **unified search system** for WebDAV files, inspired by modern search interfaces. This eliminates the need to specify exact file paths and enables natural language search across your Nextcloud files.
+The crown jewel of this MCP server is the powerful **unified search system** for WebDAV files, inspired by modern search interfaces like mcp-datagovmy. This completely transforms how you interact with your Nextcloud files by eliminating the need to specify exact file paths.
 
-### Key Features
+### ✨ Key Features
 
-- **Multi-scope Search**: Search across filenames, file content, and metadata simultaneously
-- **Smart File Type Detection**: Automatically handles text files, code, configuration files, documents, and media
-- **Advanced Filtering**: Filter by file type, size range, modification date, and directory
-- **Intelligent Ranking**: Results ranked by relevance with bonuses for recent files and exact matches
-- **Content Preview**: Optional content previews for matched text files
-- **Performance Optimized**: Intelligent caching, lazy loading, and parallel processing
+- **🎯 Multi-scope Search**: Search across filenames, file content, and metadata simultaneously
+- **🧠 Smart File Type Detection**: Automatically handles text files, code, configuration files, documents, and media
+- **🔧 Advanced Filtering**: Filter by file type, size range, modification date, and directory
+- **📈 Intelligent Ranking**: Results ranked by relevance with bonuses for recent files and exact matches
+- **👀 Content Preview**: Optional content previews for matched text files
+- **⚡ Performance Optimized**: Intelligent caching, timeout protection, and parallel processing
+- **🛡️ Error Recovery**: Fallback strategies prevent timeouts and provide helpful suggestions
 
-### Search Examples
+### 🚀 Usage Examples
 
 ```typescript
-// Basic search - find all files containing "budget"
-await nc_webdav_search_files({
-  query: "budget"
+// Basic search - find all files containing "FAQ Dean List"
+await nextcloud_webdav_search_files({
+  query: "FAQ Dean List"
 });
 
 // Advanced search - find PDF reports from 2024
-await nc_webdav_search_files({
+await nextcloud_webdav_search_files({
   query: "report 2024",
   fileTypes: ["pdf"],
   searchIn: ["filename", "content"],
   limit: 20,
-  includeContent: true
+  includeContent: true,
+  quickSearch: true
 });
 
 // Directory-specific search with date range
-await nc_webdav_search_files({
+await nextcloud_webdav_search_files({
   query: "meeting notes",
   basePath: "/Documents",
   searchIn: ["filename", "content"],
@@ -125,32 +127,105 @@ await nc_webdav_search_files({
 });
 
 // Search by file characteristics
-await nc_webdav_search_files({
-  query: "large files",
-  sizeRange: { min: 10485760 }, // Files larger than 10MB
-  fileTypes: ["pdf", "mp4", "zip"]
+await nextcloud_webdav_search_files({
+  query: "configuration files",
+  sizeRange: { min: 1024, max: 102400 }, // 1KB - 100KB
+  fileTypes: ["json", "yaml", "xml", "conf"]
+});
+
+// Quick search for large directories (optimized)
+await nextcloud_webdav_search_files({
+  query: "budget",
+  basePath: "/", // Root directory
+  quickSearch: true, // Enables optimizations
+  limit: 25,
+  maxDepth: 2 // Limit search depth
 });
 ```
 
-### Search Parameters
+### 📋 Complete Parameter Reference
 
-| Parameter | Type | Description | Example |
-|-----------|------|-------------|---------|
-| `query` | string | Search terms (required) | `"budget report"` |
-| `searchIn` | array | Where to search: `filename`, `content`, `metadata` | `["filename", "content"]` |
-| `fileTypes` | array | File extensions to include | `["pdf", "txt", "md"]` |
-| `basePath` | string | Directory to search in | `"/Documents"` |
-| `limit` | number | Max results (default: 50) | `20` |
-| `includeContent` | boolean | Include content previews | `true` |
-| `caseSensitive` | boolean | Case-sensitive matching | `false` |
-| `sizeRange` | object | File size filters | `{min: 1024, max: 1048576}` |
-| `dateRange` | object | Date range filters | `{from: "2024-01-01", to: "2024-12-31"}` |
+| Parameter | Type | Default | Description | Example |
+|-----------|------|---------|-------------|---------|
+| `query` | string | *required* | Search terms - supports multiple words | `"FAQ Dean List"` |
+| `searchIn` | array | `["filename", "content"]` | Search scope: `filename`, `content`, `metadata` | `["filename", "content", "metadata"]` |
+| `fileTypes` | array | *all types* | File extensions to include | `["pdf", "txt", "md", "docx"]` |
+| `basePath` | string | `"/"` | Directory to search in | `"/Documents/Reports"` |
+| `limit` | number | `50` | Maximum results to return | `20` |
+| `includeContent` | boolean | `false` | Include content previews for text files | `true` |
+| `caseSensitive` | boolean | `false` | Case-sensitive matching | `true` |
+| `quickSearch` | boolean | `true` | Use optimized mode for root searches | `false` |
+| `maxDepth` | number | `3` | Maximum directory depth (1-10) | `5` |
+| `sizeRange` | object | *unlimited* | File size filters in bytes | `{min: 1024, max: 1048576}` |
+| `dateRange` | object | *all dates* | Last modified date filters | `{from: "2024-01-01", to: "2024-12-31"}` |
+
+### 🎯 Performance Tips
+
+- **For root directory searches**: Use `quickSearch: true` and `maxDepth: 2-3` for faster results
+- **For specific directories**: Use `basePath: "/Documents"` instead of searching root "/"
+- **For large result sets**: Add `fileTypes` filter to narrow scope
+- **For timeout issues**: Enable `quickSearch` and use smaller `limit` values
 
 ### 🧪 Test Tool (1 tool)
 
 | Tool | Description |
 |------|-------------|
 | `hello` | Verify server connectivity and list all available tools |
+
+## 🔄 Before vs After: The Search Revolution
+
+### **Before Unified Search**
+```typescript
+// You had to know exact paths
+await nextcloud_webdav_read_file({
+  path: "/Documents/Finance/Reports/Q4_Budget_Analysis_2024.pdf"
+});
+
+// Multiple calls needed to explore
+await nextcloud_webdav_list_directory({ path: "/" });
+await nextcloud_webdav_list_directory({ path: "/Documents" });
+await nextcloud_webdav_list_directory({ path: "/Documents/Finance" });
+// ... and so on
+```
+
+### **After Unified Search** ✨
+```typescript
+// Natural language search across entire Nextcloud!
+await nextcloud_webdav_search_files({
+  query: "Q4 budget analysis 2024",
+  fileTypes: ["pdf"]
+});
+
+// Finds files instantly regardless of location!
+```
+
+## 🛠️ Advanced Search Strategies
+
+### Content-Aware Search
+The system intelligently extracts and searches content from:
+
+- **📝 Text Files**: `.txt`, `.md`, `.csv` - Full content indexing
+- **💻 Code Files**: `.js`, `.ts`, `.py`, `.html`, `.css` - Syntax-aware search
+- **⚙️ Config Files**: `.json`, `.xml`, `.yaml` - Structure-aware indexing
+- **📄 Documents**: `.pdf`, `.docx` - Metadata and properties
+- **🎬 Media Files**: Images, videos - EXIF data and metadata
+
+### Smart Ranking System
+Results are ranked using advanced algorithms:
+
+1. **Exact filename matches** → 100 points
+2. **Word boundaries in filenames** → 80 points
+3. **Partial filename matches** → 60+ points (position bonus)
+4. **Content frequency matches** → 50+ points (term density)
+5. **Recent file bonus** → +10 points (last 30 days)
+6. **File type preference** → +5 points (text/code files)
+7. **Size convenience** → +5 points (files under 100KB)
+
+### Error Handling & Recovery
+- **🕐 20-second timeout protection** - Prevents hanging operations
+- **🔄 Automatic fallback search** - Falls back to directory listing if indexing fails
+- **💡 Intelligent suggestions** - Provides helpful tips for optimization
+- **📊 Performance metrics** - Shows search duration and result counts
 
 ## Installation
 
@@ -266,8 +341,14 @@ This project includes full Smithery support with:
    - Ensure the Nextcloud instance is accessible
 
 3. **Missing Tools**:
-   - Run the `hello` tool to verify all 29 tools are available
+   - Run the `hello` tool to verify all 30 tools are available
    - Check the server logs for any initialization errors
+
+4. **Search Timeout Issues**:
+   - Use `quickSearch: true` for root directory searches
+   - Specify a `basePath` like "/Documents" instead of searching root "/"
+   - Add `fileTypes` filters to narrow the search scope
+   - Reduce `maxDepth` parameter for faster results
 
 ## Development
 
