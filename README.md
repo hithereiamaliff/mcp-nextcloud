@@ -85,7 +85,7 @@ The server provides integration with multiple Nextcloud apps, enabling LLMs to i
 
 ## 🔍 Revolutionary Unified WebDAV Search Feature
 
-The crown jewel of this MCP server is the powerful **unified search system** for WebDAV files, inspired by modern search interfaces like mcp-datagovmy. This completely transforms how you interact with your Nextcloud files by eliminating the need to specify exact file paths.
+The crown jewel of this MCP server is the powerful **unified search system** for WebDAV files, inspired by modern search interfaces like on an another MCP that I have created: [mcp-datagovmy](https://github.com/hithereiamaliff/mcp-datagovmy). This completely transforms how you interact with your Nextcloud files by eliminating the need to specify exact file paths.
 
 ### ✨ Key Features
 
