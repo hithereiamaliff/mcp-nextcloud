@@ -1,31 +1,64 @@
 {
   "name": "mcp-nextcloud",
   "version": "1.0.0",
+  "description": "A Model Context Protocol (MCP) server for Nextcloud integration, providing 30+ tools for Notes, Calendar, Contacts, Tables, and WebDAV operations with advanced unified search capabilities",
+  "type": "module",
   "main": "dist/index.js",
-  "module": "src/index.ts",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "bin": {
+    "mcp-nextcloud": "dist/cli.js"
+  },
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsc",
     "start": "ts-node src/app.ts",
+    "mcp": "node dist/cli.js",
     "tunnel": "npx localtunnel --port 3000",
     "open": "node open.js",
     "dev": "npx @smithery/cli@1.2.14 dev",
-    "deploy": "npm run build && npx @smithery/cli@1.2.14 deploy"
+    "deploy": "npm run build && npx @smithery/cli@1.2.14 deploy",
+    "prepublishOnly": "npm run build"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/hithereiamaliff/mcp-nextcloud.git"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "nextcloud",
+    "ai",
+    "llm",
+    "claude",
+    "gpt",
+    "gemini",
+    "automation",
+    "webdav",
+    "caldav",
+    "carddav",
+    "notes",
+    "calendar",
+    "contacts",
+    "tables",
+    "search",
+    "file-management"
+  ],
+  "author": "hithereiamaliff",
   "license": "AGPL-3.0",
   "bugs": {
     "url": "https://github.com/hithereiamaliff/mcp-nextcloud/issues"
   },
   "homepage": "https://github.com/hithereiamaliff/mcp-nextcloud#readme",
-  "description": "",
   "devDependencies": {
     "@smithery/cli": "^1.2.16",
     "@types/node": "^24.3.1",

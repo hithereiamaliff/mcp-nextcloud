@@ -229,6 +229,60 @@ Results are ranked using advanced algorithms:
 
 ## Installation
 
+### Quick Start with npm (Recommended)
+
+Install directly from npm and run as an MCP server:
+
+```bash
+# Install globally
+npm install -g mcp-nextcloud
+
+# Or install locally in your project
+npm install mcp-nextcloud
+```
+
+### Usage as MCP Server
+
+After installation, you can run the MCP server directly:
+
+```bash
+# If installed globally
+mcp-nextcloud
+
+# If installed locally
+npx mcp-nextcloud
+
+# Or using npm script
+npm exec mcp-nextcloud
+```
+
+**Environment Setup**: Create a `.env` file with your Nextcloud credentials:
+
+```bash
+NEXTCLOUD_HOST=https://your.nextcloud.instance.com
+NEXTCLOUD_USERNAME=your_nextcloud_username
+NEXTCLOUD_PASSWORD=your_nextcloud_app_password
+```
+
+### Integration with LLM Applications
+
+Add to your MCP client configuration (e.g., Claude Desktop, Continue, etc.):
+
+```json
+{
+  "mcpServers": {
+    "nextcloud": {
+      "command": "mcp-nextcloud",
+      "env": {
+        "NEXTCLOUD_HOST": "https://your.nextcloud.instance.com",
+        "NEXTCLOUD_USERNAME": "your_username",
+        "NEXTCLOUD_PASSWORD": "your_app_password"
+      }
+    }
+  }
+}
+```
+
 ### Prerequisites
 
 *   Node.js 18+
@@ -278,9 +332,20 @@ When deploying via Smithery, you can configure credentials through:
 
 ## Deployment & Usage
 
-### Local Development with Smithery Playground
+### Option 1: npm Package (Recommended for End Users)
 
-The fastest way to test your server locally:
+The easiest way for users to get started:
+
+```bash
+npm install -g mcp-nextcloud
+mcp-nextcloud
+```
+
+This installs a global CLI that can be used directly with MCP clients.
+
+### Option 2: Local Development with Smithery Playground
+
+The fastest way to test your server locally during development:
 
 ```bash
 npm run dev
@@ -292,7 +357,7 @@ This will:
 3. Automatically open the Smithery playground in your browser
 4. Connect to your local server for immediate testing
 
-### Cloud Deployment via Smithery
+### Option 3: Cloud Deployment via Smithery
 
 1. Ensure your project is configured:
    ```bash
@@ -315,6 +380,46 @@ npm run start
 ```
 
 The server will start and listen for MCP connections.
+
+## Publishing to npm
+
+### For Maintainers
+
+To publish this package to npm:
+
+1. **Prepare the release:**
+   ```bash
+   npm run build
+   npm version patch|minor|major
+   ```
+
+2. **Publish to npm:**
+   ```bash
+   npm publish
+   ```
+
+3. **Verify the publication:**
+   ```bash
+   npm view mcp-nextcloud
+   ```
+
+### Publishing Checklist
+
+- [ ] All tests pass (Smithery deployment confirmed working)
+- [ ] TypeScript builds without errors (`npm run build`)
+- [ ] Version bumped appropriately (`npm version`)
+- [ ] README updated with changes
+- [ ] `.npmignore` properly excludes development files
+- [ ] CLI executable works (`dist/cli.js`)
+
+### Dual Deployment Strategy
+
+This project supports both deployment methods simultaneously:
+
+- **Smithery**: For cloud deployment and development testing
+- **npm**: For end-user installation and MCP client integration
+
+The Smithery configuration (`smithery.yaml`) and npm package configuration coexist without interference.
 
 ## Smithery Integration
 
