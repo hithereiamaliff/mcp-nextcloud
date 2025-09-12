@@ -168,35 +168,97 @@ export class CalendarClient extends BaseNextcloudClient {
       const parsed = this.xmlParser.parse(xmlResponse);
       const calendars: Calendar[] = [];
 
-      const multistatus = parsed['d:multistatus'] || parsed.multistatus;
-      if (!multistatus || !multistatus['d:response']) {
+      console.log('Parsed calendar XML structure:', JSON.stringify(parsed, null, 2));
+
+      // Try different namespace variations for multistatus
+      const multistatus = parsed['d:multistatus'] ||
+                         parsed['D:multistatus'] ||
+                         parsed.multistatus;
+      
+      if (!multistatus) {
+        console.log('No multistatus element found in calendar response');
         return [];
       }
 
-      const responses = Array.isArray(multistatus['d:response'])
-        ? multistatus['d:response']
-        : [multistatus['d:response']];
+      const responses = multistatus['d:response'] ||
+                       multistatus['D:response'] ||
+                       multistatus.response;
 
-      for (const response of responses) {
-        const href = response['d:href'] || '';
-        const propstat = response['d:propstat'];
+      if (!responses) {
+        console.log('No response elements found in calendar multistatus');
+        return [];
+      }
+
+      const responseArray = Array.isArray(responses) ? responses : [responses];
+
+      for (const response of responseArray) {
+        const href = response['d:href'] ||
+                    response['D:href'] ||
+                    response.href || '';
         
-        if (!propstat || !propstat['d:prop']) continue;
+        let propstats = response['d:propstat'] ||
+                       response['D:propstat'] ||
+                       response.propstat;
+        
+        if (!propstats) {
+          console.log('No propstat found for calendar href:', href);
+          continue;
+        }
 
-        const prop = propstat['d:prop'];
-        const resourcetype = prop['d:resourcetype'];
+        // Handle propstat array - look for the one with 200 OK status
+        if (!Array.isArray(propstats)) {
+          propstats = [propstats];
+        }
 
-        // Check if this is a calendar
-        if (resourcetype && resourcetype['c:calendar'] !== undefined) {
+        let prop = null;
+        for (const propstat of propstats) {
+          const status = propstat['d:status'] || propstat.status || '';
+          if (status.includes('200 OK')) {
+            prop = propstat['d:prop'] ||
+                  propstat['D:prop'] ||
+                  propstat.prop;
+            break;
+          }
+        }
+                    
+        if (!prop) {
+          console.log('No 200 OK prop found for calendar href:', href);
+          continue;
+        }
+
+        const resourcetype = prop['d:resourcetype'] || prop.resourcetype;
+
+        // Check if this is a calendar - try different namespace variations
+        const isCalendar = resourcetype && (
+          resourcetype['c:calendar'] !== undefined ||
+          resourcetype['cal:calendar'] !== undefined ||
+          resourcetype.calendar !== undefined
+        );
+        
+        console.log('Checking resource:', {
+          href,
+          isCalendar,
+          resourcetype: JSON.stringify(resourcetype),
+          propKeys: Object.keys(prop)
+        });
+        
+        if (isCalendar) {
           const displayname = prop['d:displayname'] || '';
-          const description = prop['c:calendar-description'] || '';
-          const ctag = prop['cs:getctag'] || '';
-          const color = prop['c:calendar-color'] || '';
-          const order = parseInt(prop['c:calendar-order'] || '0');
+          const description = prop['c:calendar-description'] ||
+                             prop['cal:calendar-description'] || '';
+          const ctag = prop['cs:getctag'] ||
+                      prop['x1:getctag'] ||
+                      prop.getctag || '';
+          const color = prop['c:calendar-color'] ||
+                       prop['cal:calendar-color'] || '';
+          const order = parseInt(prop['c:calendar-order'] ||
+                               prop['cal:calendar-order'] || '0');
 
           // Extract calendar ID from href
           const pathParts = href.split('/');
           const id = pathParts[pathParts.length - 2] || pathParts[pathParts.length - 1];
+
+          console.log('Found calendar:', { id, displayname, href, ctag });
 
           if (id && id !== 'calendars' && id !== this.username) {
             calendars.push({
@@ -212,6 +274,7 @@ export class CalendarClient extends BaseNextcloudClient {
         }
       }
 
+      console.log(`Found ${calendars.length} calendars`);
       return calendars;
     } catch (error) {
       console.error('Error parsing calendars response:', error);
@@ -241,18 +304,36 @@ export class CalendarClient extends BaseNextcloudClient {
         if (!propstat || !propstat['d:prop']) continue;
 
         const prop = propstat['d:prop'];
-        const calendarData = prop['c:calendar-data'];
+        const calendarData = prop['c:calendar-data'] ||
+                            prop['C:calendar-data'] ||
+                            prop['cal:calendar-data'] ||
+                            prop['calendar-data'];
 
         if (calendarData && href.endsWith('.ics')) {
-          const event = this.parseICalendar(calendarData);
+          console.log('Found event iCalendar:', {
+            href,
+            calendarDataLength: calendarData.length,
+            calendarDataPreview: calendarData.substring(0, 100)
+          });
+          
+          // Decode HTML entities
+          const decodedIcal = this.decodeHtmlEntities(calendarData);
+          const event = this.parseICalendar(decodedIcal);
           const pathParts = href.split('/');
           const id = pathParts[pathParts.length - 1];
-          const etag = prop['d:getetag'] || '';
+          const etag = prop['d:getetag'] ||
+                      prop['D:getetag'] ||
+                      prop.getetag || '';
           events.push({
             id,
             etag,
             uri: href,
             ...event
+          });
+        } else if (href) {
+          console.log('Skipping non-iCalendar resource:', href, {
+            hasCalendarData: !!calendarData,
+            calendarDataKeys: Object.keys(prop).filter(k => k.includes('calendar'))
           });
         }
       }
@@ -341,5 +422,17 @@ export class CalendarClient extends BaseNextcloudClient {
 
     icalendar += 'END:VEVENT\nEND:VCALENDAR';
     return icalendar;
+  }
+
+  private decodeHtmlEntities(str: string): string {
+    return str
+      .replace(/&#13;/g, '\r')
+      .replace(/&#10;/g, '\n')
+      .replace(/&#9;/g, '\t')
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&'); // This should be last
   }
 }
