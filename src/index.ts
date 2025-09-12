@@ -6,6 +6,7 @@ import { setCredentials } from './utils/client-manager.js';
 // Import tool registration functions
 import { registerNotesTools } from './tools/notes.tools.js';
 import { registerCalendarTools } from './tools/calendar.tools.js';
+import { registerCalendarDebugTools } from './tools/calendar-debug.tools.js';
 import { registerContactsTools } from './tools/contacts.tools.js';
 import { registerTablesTools } from './tools/tables.tools.js';
 import { registerWebDAVTools } from './tools/webdav.tools.js';
@@ -58,6 +59,7 @@ export default function createStatelessServer({
   const toolSets: ToolRegistrationFn[] = [
     registerNotesTools,
     registerCalendarTools,
+    registerCalendarDebugTools,
     registerContactsTools,
     registerTablesTools,
     registerWebDAVTools,

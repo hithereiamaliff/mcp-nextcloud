@@ -393,23 +393,23 @@ export class CalendarClient extends BaseNextcloudClient {
     icalendar += `DTSTAMP:${now}\n`;
 
     if (event.summary) {
-      icalendar += `SUMMARY:${event.summary}\n`;
+      icalendar += `SUMMARY:${this.escapeICalProperty(event.summary)}\n`;
     }
 
     if (event.description) {
-      icalendar += `DESCRIPTION:${event.description}\n`;
+      icalendar += `DESCRIPTION:${this.escapeICalProperty(event.description)}\n`;
     }
 
     if (event.dtstart) {
-      icalendar += `DTSTART:${event.dtstart}\n`;
+      icalendar += `DTSTART:${this.convertToICalDateTime(event.dtstart)}\n`;
     }
 
     if (event.dtend) {
-      icalendar += `DTEND:${event.dtend}\n`;
+      icalendar += `DTEND:${this.convertToICalDateTime(event.dtend)}\n`;
     }
 
     if (event.location) {
-      icalendar += `LOCATION:${event.location}\n`;
+      icalendar += `LOCATION:${this.escapeICalProperty(event.location)}\n`;
     }
 
     if (event.status) {
@@ -422,6 +422,51 @@ export class CalendarClient extends BaseNextcloudClient {
 
     icalendar += 'END:VEVENT\nEND:VCALENDAR';
     return icalendar;
+  }
+
+  /**
+   * Convert ISO 8601 datetime to iCalendar format
+   */
+  private convertToICalDateTime(dateTimeStr: string): string {
+    try {
+      // If it's already in iCalendar format (YYYYMMDDTHHMMSSZ), return as-is
+      if (/^\d{8}T\d{6}Z?$/.test(dateTimeStr)) {
+        return dateTimeStr;
+      }
+
+      // Parse the ISO 8601 datetime
+      const date = new Date(dateTimeStr);
+      
+      if (isNaN(date.getTime())) {
+        console.warn(`Invalid date format: ${dateTimeStr}, using raw value`);
+        return dateTimeStr;
+      }
+
+      // Convert to UTC and format as iCalendar datetime
+      const utcYear = date.getUTCFullYear();
+      const utcMonth = String(date.getUTCMonth() + 1).padStart(2, '0');
+      const utcDay = String(date.getUTCDate()).padStart(2, '0');
+      const utcHours = String(date.getUTCHours()).padStart(2, '0');
+      const utcMinutes = String(date.getUTCMinutes()).padStart(2, '0');
+      const utcSeconds = String(date.getUTCSeconds()).padStart(2, '0');
+
+      return `${utcYear}${utcMonth}${utcDay}T${utcHours}${utcMinutes}${utcSeconds}Z`;
+    } catch (error) {
+      console.warn(`Error converting datetime ${dateTimeStr}:`, error);
+      return dateTimeStr;
+    }
+  }
+
+  /**
+   * Escape special characters in iCalendar properties
+   */
+  private escapeICalProperty(value: string): string {
+    return value
+      .replace(/\\/g, '\\\\')  // Escape backslashes first
+      .replace(/;/g, '\\;')    // Escape semicolons
+      .replace(/,/g, '\\,')    // Escape commas
+      .replace(/\n/g, '\\n')   // Escape newlines
+      .replace(/\r/g, '');     // Remove carriage returns
   }
 
   private decodeHtmlEntities(str: string): string {
