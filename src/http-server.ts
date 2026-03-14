@@ -23,6 +23,8 @@ import fs from 'fs';
 import path from 'path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { LATEST_PROTOCOL_VERSION } from '@modelcontextprotocol/sdk/types.js';
+import { z } from 'zod';
 import { type ClientSet, createClientSet, runWithClients } from './utils/client-manager.js';
 import { isKeyServiceEnabled, resolveKeyCredentials } from './utils/key-service.js';
 
@@ -37,6 +39,12 @@ import { prefixToolName } from './utils/tool-naming.js';
 
 // Type definition for tool registration functions
 type ToolRegistrationFn = (server: McpServer) => void;
+type JsonSchema = Record<string, unknown>;
+type ServerCardTool = {
+  name: string;
+  description: string;
+  inputSchema: JsonSchema;
+};
 
 // Configuration
 const PORT = parseInt(process.env.PORT || '8080', 10);
@@ -327,6 +335,161 @@ const toolSets: ToolRegistrationFn[] = [
 
 if (!IS_PRODUCTION) {
   toolSets.push(registerCalendarDebugTools);
+}
+
+function isZodSchema(value: unknown): value is z.ZodTypeAny {
+  return value instanceof z.ZodType;
+}
+
+function isOptionalLikeSchema(schema: z.ZodTypeAny): boolean {
+  return schema instanceof z.ZodOptional || schema instanceof z.ZodDefault;
+}
+
+function applySchemaDescription(schema: z.ZodTypeAny, jsonSchema: JsonSchema): JsonSchema {
+  if (schema.description && !('description' in jsonSchema)) {
+    jsonSchema.description = schema.description;
+  }
+
+  return jsonSchema;
+}
+
+function zodToJsonSchema(schema: z.ZodTypeAny): JsonSchema {
+  if (schema instanceof z.ZodDefault) {
+    const jsonSchema = zodToJsonSchema(schema.removeDefault());
+    const defaultValue = schema._def.defaultValue();
+    return applySchemaDescription(schema, {
+      ...jsonSchema,
+      default: defaultValue,
+    });
+  }
+
+  if (schema instanceof z.ZodOptional) {
+    return applySchemaDescription(schema, zodToJsonSchema(schema.unwrap()));
+  }
+
+  if (schema instanceof z.ZodNullable) {
+    return applySchemaDescription(schema, {
+      anyOf: [
+        zodToJsonSchema(schema.unwrap()),
+        { type: 'null' },
+      ],
+    });
+  }
+
+  if (schema instanceof z.ZodEffects) {
+    return applySchemaDescription(schema, zodToJsonSchema(schema.innerType()));
+  }
+
+  if (schema instanceof z.ZodString) {
+    return applySchemaDescription(schema, { type: 'string' });
+  }
+
+  if (schema instanceof z.ZodNumber) {
+    return applySchemaDescription(schema, { type: 'number' });
+  }
+
+  if (schema instanceof z.ZodBoolean) {
+    return applySchemaDescription(schema, { type: 'boolean' });
+  }
+
+  if (schema instanceof z.ZodEnum) {
+    return applySchemaDescription(schema, {
+      type: 'string',
+      enum: schema.options,
+    });
+  }
+
+  if (schema instanceof z.ZodArray) {
+    return applySchemaDescription(schema, {
+      type: 'array',
+      items: zodToJsonSchema(schema.element),
+    });
+  }
+
+  if (schema instanceof z.ZodObject) {
+    return applySchemaDescription(schema, paramsToJsonSchema(schema.shape));
+  }
+
+  return applySchemaDescription(schema, { type: 'string' });
+}
+
+function paramsToJsonSchema(paramsSchema: Record<string, unknown>): JsonSchema {
+  const properties: Record<string, JsonSchema> = {};
+  const required: string[] = [];
+
+  Object.entries(paramsSchema).forEach(([key, value]) => {
+    if (!isZodSchema(value)) {
+      return;
+    }
+
+    properties[key] = zodToJsonSchema(value);
+
+    if (!isOptionalLikeSchema(value)) {
+      required.push(key);
+    }
+  });
+
+  const jsonSchema: JsonSchema = {
+    type: 'object',
+    properties,
+    additionalProperties: false,
+  };
+
+  if (required.length > 0) {
+    jsonSchema.required = required;
+  }
+
+  return jsonSchema;
+}
+
+function getServerCardTools(): ServerCardTool[] {
+  const tools: ServerCardTool[] = [];
+  const collector = {
+    tool(name: string, descriptionOrCb: unknown, paramsSchema?: Record<string, unknown>) {
+      if (typeof descriptionOrCb !== 'string') {
+        return;
+      }
+
+      tools.push({
+        name,
+        description: descriptionOrCb,
+        inputSchema: paramsToJsonSchema(paramsSchema || {}),
+      });
+    },
+  } as unknown as McpServer;
+
+  toolSets.forEach((toolSet) => toolSet(collector));
+  tools.push({
+    name: prefixToolName('hello'),
+    description: 'A simple test tool to verify that the MCP server is working correctly',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+      additionalProperties: false,
+    },
+  });
+
+  return tools.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function getServerCard(): Record<string, unknown> {
+  return {
+    $schema: 'https://static.modelcontextprotocol.io/schemas/mcp-server-card/v1.json',
+    version: '1.0',
+    protocolVersion: LATEST_PROTOCOL_VERSION,
+    serverInfo: {
+      name: 'Nextcloud MCP Server',
+      version: '1.0.0',
+    },
+    authentication: {
+      required: true,
+      instructions: [
+        'Hosted users can connect with /nextcloud/mcp/usr_... user keys resolved by the MCP Key Service.',
+        'Smithery URL publishing should use /nextcloud/smithery/mcp with X-Nextcloud-Host, X-Nextcloud-Username, and X-Nextcloud-Password.',
+      ],
+    },
+    tools: getServerCardTools(),
+  };
 }
 
 function createScopedRegistrationServer(server: McpServer, clientSet: ClientSet): McpServer {
@@ -957,6 +1120,11 @@ function handleNoOAuthMetadata(req: Request, res: Response): void {
 
 app.all(/^\/\.well-known\/oauth-protected-resource(?:\/.*)?$/, handleNoOAuthMetadata);
 app.all(/^\/\.well-known\/oauth-authorization-server(?:\/.*)?$/, handleNoOAuthMetadata);
+app.get('/.well-known/mcp/server-card.json', (req: Request, res: Response) => {
+  trackRequest(req, '/.well-known/mcp/server-card.json');
+  res.setHeader('Cache-Control', 'public, max-age=300');
+  res.json(getServerCard());
+});
 
 async function handleServerRequest(req: Request, res: Response, server: McpServer): Promise<void> {
   const transport = new StreamableHTTPServerTransport({

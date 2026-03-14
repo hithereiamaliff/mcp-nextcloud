@@ -575,6 +575,8 @@ Why this split is recommended:
 - the Smithery path is isolated to `/smithery/mcp`, so it does not interfere with `/mcp` or `/mcp/usr_...`
 
 > **Important:** The Smithery endpoint is designed for direct credentials via headers. It does not use the MCP Key Service and does not require the shared `MCP_API_KEY`.
+>
+> To help Smithery discover tools without forcing a live authenticated scan, this server also exposes a static server card at `https://mcp.techmavie.digital/.well-known/mcp/server-card.json`. If your reverse proxy mounts the app under `/nextcloud`, make sure that exact root-level well-known path is proxied to the app.
 
 ## Publishing to npm
 
