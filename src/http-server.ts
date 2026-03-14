@@ -744,7 +744,89 @@ app.get('/analytics/dashboard', (req: Request, res: Response) => {
   res.send(html);
 });
 
-// MCP endpoint - dual-mode authentication
+// Shared handler for MCP requests once credentials are resolved
+async function handleMcpRequest(
+  req: Request,
+  res: Response,
+  credentials: { host: string; username: string; password: string }
+) {
+  // Track tool calls
+  if (req.body?.method === 'tools/call' && req.body?.params?.name) {
+    trackToolCall(req.body.params.name);
+  }
+
+  // Create per-request client set and run within isolated context
+  const clientSet = createClientSet(credentials.host, credentials.username, credentials.password);
+  const server = createHttpMcpServer(clientSet);
+  const transport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: undefined,
+  });
+  let cleanedUp = false;
+
+  const cleanup = () => {
+    if (cleanedUp) {
+      return;
+    }
+
+    cleanedUp = true;
+    void transport.close();
+    void server.close();
+  };
+
+  try {
+    res.on('close', cleanup);
+    await server.connect(transport);
+    await transport.handleRequest(req, res, req.body);
+  } catch (error) {
+    console.error('MCP request error:', error);
+    if (!res.headersSent) {
+      res.status(500).json({
+        jsonrpc: '2.0',
+        error: {
+          code: -32603,
+          message: 'Internal server error',
+        },
+        id: null,
+      });
+    }
+  } finally {
+    cleanup();
+  }
+}
+
+// MCP endpoint with API key in URL path (for clients like Claude.ai that don't support header/query auth)
+app.all('/mcp/:apiKey', async (req: Request, res: Response) => {
+  trackRequest(req, '/mcp');
+
+  if (!isKeyServiceEnabled()) {
+    res.status(404).json({
+      jsonrpc: '2.0',
+      error: { code: -32600, message: 'Path-based auth requires Key Service mode.' },
+      id: null,
+    });
+    return;
+  }
+
+  const result = await resolveKeyCredentials(req.params.apiKey);
+  if (!result.ok) {
+    const status = result.reason === 'invalid_key' ? 403 : 503;
+    const message = result.reason === 'service_unavailable'
+      ? 'Authentication service temporarily unavailable. Try again later.'
+      : result.reason === 'malformed_response'
+        ? 'Authentication service returned incomplete credentials.'
+        : 'Invalid or expired API key.';
+    res.status(status).json({
+      jsonrpc: '2.0',
+      error: { code: -32600, message },
+      id: null,
+    });
+    return;
+  }
+
+  await handleMcpRequest(req, res, result.credentials);
+});
+
+// MCP endpoint - dual-mode authentication (query param / header)
 app.all('/mcp', async (req: Request, res: Response) => {
   trackRequest(req, '/mcp');
 
@@ -808,48 +890,7 @@ app.all('/mcp', async (req: Request, res: Response) => {
     }
   }
 
-  // Track tool calls
-  if (req.body?.method === 'tools/call' && req.body?.params?.name) {
-    trackToolCall(req.body.params.name);
-  }
-
-  // Create per-request client set and run within isolated context
-  const clientSet = createClientSet(credentials.host, credentials.username, credentials.password);
-  const server = createHttpMcpServer(clientSet);
-  const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: undefined,
-  });
-  let cleanedUp = false;
-
-  const cleanup = () => {
-    if (cleanedUp) {
-      return;
-    }
-
-    cleanedUp = true;
-    void transport.close();
-    void server.close();
-  };
-
-  try {
-    res.on('close', cleanup);
-    await server.connect(transport);
-    await transport.handleRequest(req, res, req.body);
-  } catch (error) {
-    console.error('MCP request error:', error);
-    if (!res.headersSent) {
-      res.status(500).json({
-        jsonrpc: '2.0',
-        error: {
-          code: -32603,
-          message: 'Internal server error',
-        },
-        id: null,
-      });
-    }
-  } finally {
-    cleanup();
-  }
+  await handleMcpRequest(req, res, credentials);
 });
 
 // Root endpoint with server info (no credentials or sensitive data exposed)
@@ -862,14 +903,18 @@ app.get('/', (req: Request, res: Response) => {
     transport: 'streamable-http',
     endpoints: {
       mcp: '/mcp',
+      mcp_with_key: '/mcp/:apiKey (for clients that cannot send headers or query params)',
       health: '/health',
     },
     authentication: isKeyServiceEnabled()
       ? {
           mode: 'key-service',
           description: 'Provide a user API key. Credentials are resolved via the MCP Key Service.',
-          queryParam: 'api_key',
-          example: '/mcp?api_key=usr_XXXXXXXX',
+          options: {
+            path: '/mcp/usr_XXXXXXXX (recommended for Claude.ai)',
+            queryParam: '/mcp?api_key=usr_XXXXXXXX',
+            header: 'X-API-Key: usr_XXXXXXXX',
+          },
         }
       : {
           mode: 'self-hosted',
