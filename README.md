@@ -364,6 +364,8 @@ MCP_API_KEY=your-secret-api-key-here
 
 # --- HTTP server: Key Service mode ---
 # Set both to enable user api_key=usr_... resolution via the MCP Key Service.
+# Users obtain and manage those keys at https://mcpkeys.techmavie.digital
+# The MCP server itself talks to the resolver endpoint below.
 KEY_SERVICE_URL=https://mcpkeys.techmavie.digital/internal/resolve
 KEY_SERVICE_TOKEN=your-key-service-bearer-token
 
@@ -396,7 +398,13 @@ The easiest way to use this MCP server is via the hosted endpoint. **No installa
 
 #### Authentication
 
-The hosted server uses the **MCP Key Service** for authentication. You get a personal API key (`usr_XXXXXXXX`) from the portal, and the server resolves your Nextcloud credentials automatically.
+The hosted server uses the **MCP Key Service** for authentication. You get a personal API key (`usr_XXXXXXXX`) from the MCP Key Service portal:
+
+```text
+https://mcpkeys.techmavie.digital
+```
+
+The server then resolves your Nextcloud credentials automatically through the resolver endpoint behind the scenes.
 
 Why this is safer than the old query-credential approach:
 
@@ -440,7 +448,7 @@ npx @modelcontextprotocol/inspector
 
 ### Option 2: Self-Hosted (VPS)
 
-If you prefer to run your own instance, see [deploy/DEPLOYMENT.md](deploy/DEPLOYMENT.md) for detailed VPS deployment instructions with Docker and Nginx.
+If you prefer to run your own instance, the built-in Docker + Nginx setup is:
 
 ```bash
 # Set required environment variables
@@ -455,6 +463,39 @@ docker compose up -d --build
 npm run build
 npm run start:http
 ```
+
+#### Recommended VPS setup
+
+1. Clone the repo onto your server:
+   ```bash
+   git clone https://github.com/hithereiamaliff/mcp-nextcloud.git
+   cd mcp-nextcloud
+   ```
+2. Create a `.env` file with your server settings:
+   ```dotenv
+   MCP_API_KEY=your-secret-api-key
+   KEY_SERVICE_URL=https://mcpkeys.techmavie.digital/internal/resolve
+   KEY_SERVICE_TOKEN=your-key-service-bearer-token
+   ALLOWED_ORIGINS=https://smithery.ai,https://claude.ai
+   ```
+   Notes:
+   - Use `KEY_SERVICE_URL` + `KEY_SERVICE_TOKEN` only if you want hosted-style `usr_...` key resolution.
+   - Users obtain and manage those keys at `https://mcpkeys.techmavie.digital`.
+   - The MCP server itself should keep using the resolver endpoint path, not the portal homepage.
+3. Start the container:
+   ```bash
+   docker compose up -d --build
+   ```
+4. Add the reverse proxy config from [deploy/nginx-mcp.conf](deploy/nginx-mcp.conf) to your nginx server block.
+5. Validate and reload nginx:
+   ```bash
+   sudo nginx -t
+   sudo systemctl reload nginx
+   ```
+6. Verify the server:
+   ```bash
+   curl http://127.0.0.1:8080/health
+   ```
 
 > **Important:** The HTTP server does NOT use `NEXTCLOUD_*` environment variables. In self-hosted mode, each client must provide Nextcloud credentials via request headers. In key-service mode, clients send only `api_key=usr_...`.
 
@@ -641,7 +682,6 @@ If the hosted connector still fails, use this order:
 │   ├── tools/            # Tool implementations
 │   └── utils/            # Utility functions
 ├── deploy/
-│   ├── DEPLOYMENT.md     # VPS deployment guide
 │   └── nginx-mcp.conf    # Nginx reverse proxy config
 ├── .github/
 │   └── workflows/
