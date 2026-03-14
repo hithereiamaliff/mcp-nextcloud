@@ -13,6 +13,8 @@
 
 The Nextcloud MCP (Model Context Protocol) server allows Large Language Models (LLMs) like OpenAI's GPT, Google's Gemini, or Anthropic's Claude to interact with your Nextcloud instance. This enables automation of various Nextcloud actions across Notes, Calendar, Contacts, Tables, and WebDAV file operations.
 
+The hosted HTTP integration now supports a safer multi-user flow through the MCP Key Service. Instead of embedding raw Nextcloud credentials in the connector URL, hosted clients can use a user-scoped `usr_...` key and let the server resolve credentials server-side.
+
 ## Features
 
 The server provides integration with multiple Nextcloud apps, enabling LLMs to interact with your Nextcloud data through a comprehensive set of **30 tools** across 5 main categories.
@@ -290,11 +292,13 @@ Add to your MCP client configuration (e.g., Claude Desktop, Continue, etc.):
   "mcpServers": {
     "nextcloud": {
       "transport": "streamable-http",
-      "url": "https://mcp.techmavie.digital/nextcloud/mcp?api_key=usr_XXXXXXXX"
+      "url": "https://mcp.techmavie.digital/nextcloud/mcp/usr_XXXXXXXX"
     }
   }
 }
 ```
+
+> **Recommended for hosted clients:** Use the path-based URL form (`/mcp/usr_...`) for Claude.ai and similar hosted connectors. Keep the query-param form as a compatibility option for inspectors and clients that preserve query params reliably.
 
 **For self-hosted HTTP mode (your own server):**
 ```json
@@ -365,11 +369,16 @@ KEY_SERVICE_TOKEN=your-key-service-bearer-token
 
 # Optional: Comma-separated list of allowed CORS origins.
 ALLOWED_ORIGINS=https://smithery.ai,https://claude.ai
+
+# Optional diagnostics for remote MCP debugging.
+# These are intended for temporary troubleshooting in hosted HTTP mode.
+MCP_TRACE_HTTP=false
+ENABLE_MCP_DIAGNOSTICS=false
 ```
 
 **Important Security Notes:**
 - Use a dedicated Nextcloud App Password instead of your regular login password. Generate one in your Nextcloud Security settings.
-- In HTTP mode, `NEXTCLOUD_*` environment variables are **never used**. Self-hosted clients provide credentials via `X-Nextcloud-*` headers, while key-service clients send only `api_key=usr_...`.
+- In HTTP mode, `NEXTCLOUD_*` environment variables are **never used**. Self-hosted clients provide credentials via `X-Nextcloud-*` headers, while key-service clients send only a `usr_...` key.
 - Generate a strong API key: `openssl rand -hex 32`
 
 ### Smithery Configuration
@@ -389,6 +398,21 @@ The easiest way to use this MCP server is via the hosted endpoint. **No installa
 
 The hosted server uses the **MCP Key Service** for authentication. You get a personal API key (`usr_XXXXXXXX`) from the portal, and the server resolves your Nextcloud credentials automatically.
 
+Why this is safer than the old query-credential approach:
+
+- raw Nextcloud credentials are not embedded in the connector URL
+- revoking a `usr_...` key is easier than rotating a user's underlying Nextcloud password everywhere
+- server-side auditing and policy are easier to centralize
+- support/debug workflows are safer because users share a scoped key, not their real Nextcloud password
+
+**Claude.ai / hosted connector URL (recommended):**
+
+```
+https://mcp.techmavie.digital/nextcloud/mcp/usr_XXXXXXXX
+```
+
+**Alternative URL for clients that preserve query params correctly:**
+
 ```
 https://mcp.techmavie.digital/nextcloud/mcp?api_key=usr_XXXXXXXX
 ```
@@ -400,7 +424,7 @@ https://mcp.techmavie.digital/nextcloud/mcp?api_key=usr_XXXXXXXX
   "mcpServers": {
     "nextcloud": {
       "transport": "streamable-http",
-      "url": "https://mcp.techmavie.digital/nextcloud/mcp?api_key=usr_XXXXXXXX"
+      "url": "https://mcp.techmavie.digital/nextcloud/mcp/usr_XXXXXXXX"
     }
   }
 }
@@ -411,7 +435,7 @@ https://mcp.techmavie.digital/nextcloud/mcp?api_key=usr_XXXXXXXX
 ```bash
 npx @modelcontextprotocol/inspector
 # Select "Streamable HTTP"
-# Enter URL: https://mcp.techmavie.digital/nextcloud/mcp?api_key=usr_XXXXXXXX
+# Enter URL: https://mcp.techmavie.digital/nextcloud/mcp/usr_XXXXXXXX
 ```
 
 ### Option 2: Self-Hosted (VPS)
@@ -433,6 +457,10 @@ npm run start:http
 ```
 
 > **Important:** The HTTP server does NOT use `NEXTCLOUD_*` environment variables. In self-hosted mode, each client must provide Nextcloud credentials via request headers. In key-service mode, clients send only `api_key=usr_...`.
+
+> **Remote MCP note:** For hosted connectors such as Claude.ai, prefer the path-based URL form (`/mcp/usr_...`). Keep the query-param form as a compatibility option for inspectors and clients that preserve query params reliably.
+
+> **Debugging note:** If a hosted client shows a generic auth prompt, it does not automatically mean OAuth is required. First verify the auth-free diagnostics route, the key-service resolver response, and the actual `initialize` SSE body.
 
 ### Option 3: npm Package (CLI)
 
@@ -512,7 +540,7 @@ The HTTP server (`http-server.ts`) supports two authentication modes:
 
 **Key Service Mode** (hosted/multi-user):
 - User API keys (`usr_...`) are resolved via the MCP Key Service which returns encrypted Nextcloud credentials.
-- No raw credentials are sent by the client - only the API key.
+- No raw credentials are sent by the client - only the user-scoped API key.
 - Credentials are cached for 60 seconds to reduce key service load, then re-validated.
 
 **Self-Hosted Mode** (single-operator):
@@ -560,6 +588,44 @@ If you deploy your own instance:
    - Specify a `basePath` like "/Documents" instead of searching root "/"
    - Add `fileTypes` filters to narrow the search scope
    - Reduce `maxDepth` parameter for faster results
+
+### Hosted HTTP / Claude.ai Debugging
+
+If the hosted connector still fails, use this order:
+
+1. Verify the auth-free diagnostics route first:
+   - enable `ENABLE_MCP_DIAGNOSTICS=true`
+   - test `/mcp-debug/open`
+   - if this works, the issue is likely auth or an upstream dependency, not basic MCP transport
+2. Verify the key-service resolver directly from the deployed MCP host:
+   ```bash
+   curl -i -X POST "$KEY_SERVICE_URL" \
+     -H "Authorization: Bearer $KEY_SERVICE_TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"key":"usr_..."}'
+   ```
+   Expected:
+   - `200 OK`
+   - `Content-Type: application/json`
+   - valid JSON response
+3. Verify the MCP initialize response body, not just the status code:
+   ```bash
+   curl -N --max-time 10 -X POST "https://mcp.techmavie.digital/nextcloud/mcp/usr_XXXXXXXX" \
+     -H "Content-Type: application/json" \
+     -H "Accept: application/json, text/event-stream" \
+     -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"probe","version":"1.0.0"}}}'
+   ```
+   Expected:
+   - `200 OK`
+   - `Content-Type: text/event-stream`
+   - non-empty SSE initialize response body
+4. If the hosted client keeps retrying the same initialize request every few seconds, suspect an empty or malformed SSE initialize response even if the HTTP status is `200`.
+5. Enable temporary tracing with `MCP_TRACE_HTTP=true` and inspect:
+   - final status code
+   - request `accept`
+   - request `content-type`
+   - `content-type` response header
+   - auth outcome (`resolved`, `invalid_key`, `service_unavailable`, `malformed_response`)
 
 ## Development
 
