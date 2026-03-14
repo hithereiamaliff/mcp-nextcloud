@@ -307,6 +307,12 @@ app.use(cors({
 
 app.use(express.json());
 
+// Request logging (all incoming requests)
+app.use((req: Request, _res: Response, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
+  next();
+});
+
 // Health check endpoint (no auth required - used by Docker healthcheck)
 app.get('/health', (req: Request, res: Response) => {
   trackRequest(req, '/health');
