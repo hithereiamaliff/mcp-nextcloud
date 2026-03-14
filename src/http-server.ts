@@ -23,7 +23,7 @@ import fs from 'fs';
 import path from 'path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { createClientSet, runWithClients } from './utils/client-manager.js';
+import { type ClientSet, createClientSet, runWithClients } from './utils/client-manager.js';
 import { isKeyServiceEnabled, resolveKeyCredentials } from './utils/key-service.js';
 
 // Import tool registration functions
@@ -220,12 +220,6 @@ function extractCredentials(req: Request): { host: string; username: string; pas
   return { host, username, password };
 }
 
-// Create MCP server
-const mcpServer = new McpServer({
-  name: 'Nextcloud MCP Server',
-  version: '1.0.0',
-});
-
 // Register all tool sets (skip debug tools in production)
 const toolSets: ToolRegistrationFn[] = [
   registerNotesTools,
@@ -239,37 +233,59 @@ if (!IS_PRODUCTION) {
   toolSets.push(registerCalendarDebugTools);
 }
 
-// Register all tools
-toolSets.forEach((toolSet) => toolSet(mcpServer));
+function createScopedRegistrationServer(server: McpServer, clientSet: ClientSet): McpServer {
+  const registrationServer = Object.create(server) as McpServer;
+  const originalTool = server.tool.bind(server);
 
-// Register hello tool for testing
-mcpServer.tool(
-  prefixToolName('hello'),
-  'A simple test tool to verify that the MCP server is working correctly',
-  {},
-  async () => {
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify({
-            message: 'Hello from Nextcloud MCP!',
-            timestamp: new Date().toISOString(),
-            transport: 'streamable-http',
-            available_tools: [
-              'Notes: nextcloud_notes_create_note, nextcloud_notes_update_note, nextcloud_notes_append_content, nextcloud_notes_search_notes, nextcloud_notes_delete_note',
-              'Calendar: nextcloud_calendar_list_calendars, nextcloud_calendar_create_event, nextcloud_calendar_list_events, nextcloud_calendar_get_event, nextcloud_calendar_update_event, nextcloud_calendar_delete_event',
-              'Contacts: nextcloud_contacts_list_addressbooks, nextcloud_contacts_create_addressbook, nextcloud_contacts_delete_addressbook, nextcloud_contacts_list_contacts, nextcloud_contacts_create_contact, nextcloud_contacts_delete_contact',
-              'Tables: nextcloud_tables_list_tables, nextcloud_tables_get_schema, nextcloud_tables_read_table, nextcloud_tables_insert_row, nextcloud_tables_update_row, nextcloud_tables_delete_row',
-              'WebDAV: nextcloud_webdav_list_directory, nextcloud_webdav_read_file, nextcloud_webdav_write_file, nextcloud_webdav_create_directory, nextcloud_webdav_delete_resource'
-            ],
-            total_tools: 29,
-          }, null, 2),
-        },
-      ],
-    };
-  }
-);
+  registrationServer.tool = ((name: string, description: string, paramsSchema: any, handler: any) => {
+    return originalTool(name, description, paramsSchema, async (args: unknown, extra: unknown) => {
+      return runWithClients(clientSet, () => Promise.resolve(handler(args, extra)));
+    });
+  }) as typeof server.tool;
+
+  return registrationServer;
+}
+
+function createHttpMcpServer(clientSet: ClientSet): McpServer {
+  const server = new McpServer({
+    name: 'Nextcloud MCP Server',
+    version: '1.0.0',
+  });
+
+  const registrationServer = createScopedRegistrationServer(server, clientSet);
+
+  toolSets.forEach((toolSet) => toolSet(registrationServer));
+
+  server.tool(
+    prefixToolName('hello'),
+    'A simple test tool to verify that the MCP server is working correctly',
+    {},
+    async () => {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              message: 'Hello from Nextcloud MCP!',
+              timestamp: new Date().toISOString(),
+              transport: 'streamable-http',
+              available_tools: [
+                'Notes: nextcloud_notes_create_note, nextcloud_notes_update_note, nextcloud_notes_append_content, nextcloud_notes_search_notes, nextcloud_notes_delete_note',
+                'Calendar: nextcloud_calendar_list_calendars, nextcloud_calendar_create_event, nextcloud_calendar_list_events, nextcloud_calendar_get_event, nextcloud_calendar_update_event, nextcloud_calendar_delete_event',
+                'Contacts: nextcloud_contacts_list_addressbooks, nextcloud_contacts_create_addressbook, nextcloud_contacts_delete_addressbook, nextcloud_contacts_list_contacts, nextcloud_contacts_create_contact, nextcloud_contacts_delete_contact',
+                'Tables: nextcloud_tables_list_tables, nextcloud_tables_get_schema, nextcloud_tables_read_table, nextcloud_tables_insert_row, nextcloud_tables_update_row, nextcloud_tables_delete_row',
+                'WebDAV: nextcloud_webdav_list_directory, nextcloud_webdav_read_file, nextcloud_webdav_write_file, nextcloud_webdav_create_directory, nextcloud_webdav_delete_resource'
+              ],
+              total_tools: 29,
+            }, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  return server;
+}
 
 // Create Express app
 const app = express();
@@ -728,11 +744,6 @@ app.get('/analytics/dashboard', (req: Request, res: Response) => {
   res.send(html);
 });
 
-// Create Streamable HTTP transport (stateless)
-const transport = new StreamableHTTPServerTransport({
-  sessionIdGenerator: undefined,
-});
-
 // MCP endpoint - dual-mode authentication
 app.all('/mcp', async (req: Request, res: Response) => {
   trackRequest(req, '/mcp');
@@ -804,11 +815,26 @@ app.all('/mcp', async (req: Request, res: Response) => {
 
   // Create per-request client set and run within isolated context
   const clientSet = createClientSet(credentials.host, credentials.username, credentials.password);
+  const server = createHttpMcpServer(clientSet);
+  const transport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: undefined,
+  });
+  let cleanedUp = false;
+
+  const cleanup = () => {
+    if (cleanedUp) {
+      return;
+    }
+
+    cleanedUp = true;
+    void transport.close();
+    void server.close();
+  };
 
   try {
-    await runWithClients(clientSet, async () => {
-      await transport.handleRequest(req, res, req.body);
-    });
+    res.on('close', cleanup);
+    await server.connect(transport);
+    await transport.handleRequest(req, res, req.body);
   } catch (error) {
     console.error('MCP request error:', error);
     if (!res.headersSent) {
@@ -821,6 +847,8 @@ app.all('/mcp', async (req: Request, res: Response) => {
         id: null,
       });
     }
+  } finally {
+    cleanup();
   }
 });
 
@@ -857,28 +885,20 @@ app.get('/', (req: Request, res: Response) => {
   });
 });
 
-// Connect server to transport and start listening
-mcpServer.server.connect(transport)
-  .then(() => {
-    app.listen(PORT, HOST, () => {
-      console.log('='.repeat(60));
-      console.log('Nextcloud MCP Server (Streamable HTTP)');
-      console.log('='.repeat(60));
-      console.log(`Server running on http://${HOST}:${PORT}`);
-      console.log(`MCP endpoint: http://${HOST}:${PORT}/mcp`);
-      console.log(`Health check: http://${HOST}:${PORT}/health`);
-      if (isKeyServiceEnabled()) {
-        console.log(`Auth mode: Key Service (${process.env.KEY_SERVICE_URL})`);
-        console.log(`Analytics auth: ${MCP_API_KEY ? 'configured' : 'NOT SET (/analytics disabled)'}`);
-      } else {
-        console.log(`Auth mode: Self-hosted (MCP_API_KEY: ${MCP_API_KEY ? 'configured' : 'NOT SET'})`);
-      }
-      console.log(`Debug tools: ${IS_PRODUCTION ? 'disabled (production)' : 'enabled (development)'}`);
-      console.log('='.repeat(60));
-      console.log('');
-    });
-  })
-  .catch((error) => {
-    console.error('Failed to start server:', error);
-    process.exit(1);
-  });
+app.listen(PORT, HOST, () => {
+  console.log('='.repeat(60));
+  console.log('Nextcloud MCP Server (Streamable HTTP)');
+  console.log('='.repeat(60));
+  console.log(`Server running on http://${HOST}:${PORT}`);
+  console.log(`MCP endpoint: http://${HOST}:${PORT}/mcp`);
+  console.log(`Health check: http://${HOST}:${PORT}/health`);
+  if (isKeyServiceEnabled()) {
+    console.log(`Auth mode: Key Service (${process.env.KEY_SERVICE_URL})`);
+    console.log(`Analytics auth: ${MCP_API_KEY ? 'configured' : 'NOT SET (/analytics disabled)'}`);
+  } else {
+    console.log(`Auth mode: Self-hosted (MCP_API_KEY: ${MCP_API_KEY ? 'configured' : 'NOT SET'})`);
+  }
+  console.log(`Debug tools: ${IS_PRODUCTION ? 'disabled (production)' : 'enabled (development)'}`);
+  console.log('='.repeat(60));
+  console.log('');
+});
