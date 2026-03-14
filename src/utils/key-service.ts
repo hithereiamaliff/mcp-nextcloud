@@ -83,6 +83,7 @@ export async function resolveKeyCredentials(apiKey: string): Promise<ResolveResu
 async function doResolve(apiKey: string): Promise<ResolveResult> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const shortKey = apiKey.substring(0, 12);
 
   try {
     const res = await fetch(KEY_SERVICE_URL, {
@@ -95,13 +96,43 @@ async function doResolve(apiKey: string): Promise<ResolveResult> {
       signal: controller.signal,
     });
 
-    if (res.status === 404 || res.status === 403) {
-      return { ok: false, reason: 'invalid_key' };
-    }
+    const contentType = res.headers.get('content-type') || '';
+    const isJson = contentType.includes('application/json');
 
     if (!res.ok) {
-      console.error(`Key service returned ${res.status} for key ${apiKey.substring(0, 12)}...`);
+      let bodySnippet = '';
+
+      try {
+        bodySnippet = (await res.text()).replace(/\s+/g, ' ').trim().slice(0, 200);
+      } catch {
+        bodySnippet = '';
+      }
+
+      if ((res.status === 403 || res.status === 404) && isJson) {
+        try {
+          const parsed = bodySnippet ? JSON.parse(bodySnippet) as { valid?: boolean } : undefined;
+          if (parsed?.valid === false) {
+            return { ok: false, reason: 'invalid_key' };
+          }
+        } catch {
+          // Fall through to service_unavailable if the body is not valid JSON.
+        }
+      }
+
+      console.error(
+        `Key service returned unexpected ${res.status} (${contentType || 'unknown content-type'}) for key ${shortKey}...` +
+        (bodySnippet ? ` Body: ${bodySnippet}` : '')
+      );
       return { ok: false, reason: 'service_unavailable' };
+    }
+
+    if (!isJson) {
+      const bodySnippet = (await res.text()).replace(/\s+/g, ' ').trim().slice(0, 200);
+      console.error(
+        `Key service returned non-JSON success response (${contentType || 'unknown content-type'}) for key ${shortKey}...` +
+        (bodySnippet ? ` Body: ${bodySnippet}` : '')
+      );
+      return { ok: false, reason: 'malformed_response' };
     }
 
     const data = await res.json() as {
@@ -115,7 +146,7 @@ async function doResolve(apiKey: string): Promise<ResolveResult> {
 
     const creds = data.credentials;
     if (!creds?.nextcloud_host || !creds?.nextcloud_username || !creds?.nextcloud_password) {
-      console.error(`Key service returned incomplete credentials for key ${apiKey.substring(0, 12)}...`);
+      console.error(`Key service returned incomplete credentials for key ${shortKey}...`);
       return { ok: false, reason: 'malformed_response' };
     }
 
@@ -134,9 +165,9 @@ async function doResolve(apiKey: string): Promise<ResolveResult> {
     return { ok: true, credentials };
   } catch (error: unknown) {
     if (error instanceof Error && error.name === 'AbortError') {
-      console.error(`Key service request timed out for key ${apiKey.substring(0, 12)}...`);
+      console.error(`Key service request timed out for key ${shortKey}...`);
     } else {
-      console.error(`Key service request failed for key ${apiKey.substring(0, 12)}...:`, error);
+      console.error(`Key service request failed for key ${shortKey}...:`, error);
     }
     return { ok: false, reason: 'service_unavailable' };
   } finally {

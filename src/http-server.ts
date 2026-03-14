@@ -967,9 +967,16 @@ async function handleServerRequest(req: Request, res: Response, server: McpServe
   };
 
   try {
-    res.on('close', cleanup);
+    res.once('finish', cleanup);
+    res.once('close', cleanup);
     await server.connect(transport);
     await transport.handleRequest(req, res, req.body);
+
+    // Streamable HTTP may return before async handlers have written their
+    // JSON-RPC response. Only clean up immediately if the response already ended.
+    if (res.writableEnded) {
+      cleanup();
+    }
   } catch (error) {
     console.error('MCP request error:', error);
     if (!res.headersSent) {
@@ -981,9 +988,8 @@ async function handleServerRequest(req: Request, res: Response, server: McpServe
         },
         id: null,
       });
+      cleanup();
     }
-  } finally {
-    cleanup();
   }
 }
 
