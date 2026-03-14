@@ -98,18 +98,25 @@ export class CalendarClient extends BaseNextcloudClient {
     start?: string,
     end?: string
   ): Promise<Event[]> {
-    const propfindXml = `<?xml version="1.0" encoding="utf-8" ?>
-<d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
-  <d:prop>
-    <d:getetag />
-    <c:calendar-data />
-  </d:prop>
-</d:propfind>`;
+    const reportXml = `<?xml version="1.0" encoding="utf-8" ?>
+<C:calendar-query xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+  <D:prop>
+    <D:getetag />
+    <C:calendar-data />
+  </D:prop>
+  <C:filter>
+    <C:comp-filter name="VCALENDAR">
+      <C:comp-filter name="VEVENT">
+      ${start || end ? `<C:time-range ${start ? `start="${this.convertToICalDateTime(start)}"` : ''} ${end ? `end="${this.convertToICalDateTime(end)}"` : ''}/>` : ''}
+      </C:comp-filter>
+    </C:comp-filter>
+  </C:filter>
+</C:calendar-query>`;
 
     const response = await this.makeWebDAVRequest({
-      method: 'PROPFIND',
+      method: 'REPORT',
       url: `/remote.php/dav/calendars/{username}/${calendarId}/`,
-      data: propfindXml,
+      data: reportXml,
     });
 
     return this.parseEventsResponse(response);
