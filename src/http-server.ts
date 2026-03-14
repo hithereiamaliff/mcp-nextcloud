@@ -1,25 +1,30 @@
 /**
  * Nextcloud MCP Server - Streamable HTTP Transport
- * 
+ *
  * This file provides an HTTP server for self-hosting the MCP server on a VPS.
  * It uses the Streamable HTTP transport for MCP communication.
- * 
+ *
+ * Two authentication modes:
+ * - Key Service Mode (KEY_SERVICE_URL + KEY_SERVICE_TOKEN): user provides api_key=usr_...
+ *   which is resolved via the MCP Key Service to get Nextcloud credentials.
+ * - Self-Hosted Mode (MCP_API_KEY): user provides X-API-Key header plus
+ *   X-Nextcloud-* headers for credentials.
+ *
  * Usage:
  *   npm run build
- *   node dist/src/http-server.js
- * 
- * Or with environment variables:
- *   PORT=8080 node dist/src/http-server.js
+ *   MCP_API_KEY=your-secret node dist/http-server.js
  */
 
 import 'dotenv/config';
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { setCredentials } from './utils/client-manager.js';
+import { createClientSet, runWithClients } from './utils/client-manager.js';
+import { isKeyServiceEnabled, resolveKeyCredentials } from './utils/key-service.js';
 
 // Import tool registration functions
 import { registerNotesTools } from './tools/notes.tools.js';
@@ -37,6 +42,31 @@ type ToolRegistrationFn = (server: McpServer) => void;
 const PORT = parseInt(process.env.PORT || '8080', 10);
 const HOST = process.env.HOST || '0.0.0.0';
 const ANALYTICS_FILE = process.env.ANALYTICS_FILE || '/app/data/nextcloud-mcp-analytics.json';
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+
+// API key for protecting endpoints (used in self-hosted mode and for analytics)
+const MCP_API_KEY = process.env.MCP_API_KEY;
+
+if (isKeyServiceEnabled()) {
+  console.log('Key Service mode enabled. User keys will be resolved via:', process.env.KEY_SERVICE_URL);
+  if (!MCP_API_KEY) {
+    console.warn('WARNING: MCP_API_KEY is not set.');
+    console.warn('   /mcp will work via the key service, but /analytics will reject all requests.');
+  }
+} else if (!MCP_API_KEY) {
+  console.warn('WARNING: MCP_API_KEY is not set and KEY_SERVICE_URL is not configured.');
+  console.warn('   The /mcp endpoint will reject all requests.');
+}
+
+// CORS configuration
+const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
+  : ['https://smithery.ai', 'https://claude.ai'];
+
+// Hash an IP address for analytics (privacy-preserving)
+function hashIp(ip: string): string {
+  return crypto.createHash('sha256').update(ip).digest('hex').substring(0, 12);
+}
 
 // Analytics tracking
 interface Analytics {
@@ -46,7 +76,7 @@ interface Analytics {
   requestsByMethod: Record<string, number>;
   requestsByEndpoint: Record<string, number>;
   toolCalls: Record<string, number>;
-  recentToolCalls: Array<{ tool: string; timestamp: string; clientIp: string }>;
+  recentToolCalls: Array<{ tool: string; timestamp: string }>;
   clientsByIp: Record<string, number>;
   clientsByUserAgent: Record<string, number>;
   hourlyRequests: Record<string, number>;
@@ -71,11 +101,11 @@ function loadAnalytics(): Analytics {
     if (fs.existsSync(ANALYTICS_FILE)) {
       const data = fs.readFileSync(ANALYTICS_FILE, 'utf-8');
       const loaded = JSON.parse(data) as Analytics;
-      console.log(`📊 Loaded analytics from ${ANALYTICS_FILE}`);
+      console.log(`Loaded analytics from ${ANALYTICS_FILE}`);
       return loaded;
     }
   } catch (error) {
-    console.warn('⚠️ Could not load analytics file, starting fresh:', error);
+    console.warn('Could not load analytics file, starting fresh:', error);
   }
   return { ...defaultAnalytics };
 }
@@ -89,7 +119,7 @@ function saveAnalytics(): void {
     }
     fs.writeFileSync(ANALYTICS_FILE, JSON.stringify(analytics, null, 2));
   } catch (error) {
-    console.warn('⚠️ Could not save analytics file:', error);
+    console.warn('Could not save analytics file:', error);
   }
 }
 
@@ -98,13 +128,13 @@ setInterval(saveAnalytics, 5 * 60 * 1000);
 
 // Save on process exit
 process.on('SIGTERM', () => {
-  console.log('📊 Saving analytics before shutdown...');
+  console.log('Saving analytics before shutdown...');
   saveAnalytics();
   process.exit(0);
 });
 
 process.on('SIGINT', () => {
-  console.log('📊 Saving analytics before shutdown...');
+  console.log('Saving analytics before shutdown...');
   saveAnalytics();
   process.exit(0);
 });
@@ -125,29 +155,69 @@ function trackRequest(req: Request, endpoint: string): void {
   analytics.totalRequests++;
   analytics.requestsByMethod[req.method] = (analytics.requestsByMethod[req.method] || 0) + 1;
   analytics.requestsByEndpoint[endpoint] = (analytics.requestsByEndpoint[endpoint] || 0) + 1;
-  
+
   const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0] || req.ip || 'unknown';
-  analytics.clientsByIp[clientIp] = (analytics.clientsByIp[clientIp] || 0) + 1;
-  
+  const hashedIp = hashIp(clientIp);
+  analytics.clientsByIp[hashedIp] = (analytics.clientsByIp[hashedIp] || 0) + 1;
+
   const userAgent = req.headers['user-agent'] || 'unknown';
   const shortAgent = userAgent.split('/')[0] || userAgent.substring(0, 30);
   analytics.clientsByUserAgent[shortAgent] = (analytics.clientsByUserAgent[shortAgent] || 0) + 1;
-  
+
   const hourKey = new Date().toISOString().substring(0, 13) + ':00';
   analytics.hourlyRequests[hourKey] = (analytics.hourlyRequests[hourKey] || 0) + 1;
 }
 
-function trackToolCall(toolName: string, clientIp: string): void {
+function trackToolCall(toolName: string): void {
   analytics.totalToolCalls++;
   analytics.toolCalls[toolName] = (analytics.toolCalls[toolName] || 0) + 1;
   analytics.recentToolCalls.unshift({
     tool: toolName,
     timestamp: new Date().toISOString(),
-    clientIp,
   });
   if (analytics.recentToolCalls.length > 100) {
     analytics.recentToolCalls.pop();
   }
+}
+
+// --- Authentication helpers ---
+
+// Validate API key from request headers or query param
+function validateApiKey(req: Request): boolean {
+  if (!MCP_API_KEY) return false;
+  const apiKey = (req.headers['x-api-key'] as string) || (req.query.api_key as string);
+  return apiKey === MCP_API_KEY;
+}
+
+// API key middleware for protected endpoints
+function requireApiKey(req: Request, res: Response, next: NextFunction): void {
+  if (!validateApiKey(req)) {
+    res.status(403).json({
+      jsonrpc: '2.0',
+      error: {
+        code: -32600,
+        message: 'Forbidden: Invalid or missing API key. Provide a valid X-API-Key header.',
+      },
+      id: null,
+    });
+    return;
+  }
+  next();
+}
+
+// Extract Nextcloud credentials from request headers only.
+// Used in self-hosted mode where each client provides their own credentials.
+// No env var or query param fallback — prevents credential leaking between users.
+function extractCredentials(req: Request): { host: string; username: string; password: string } | null {
+  const host = req.headers['x-nextcloud-host'] as string || '';
+  const username = req.headers['x-nextcloud-username'] as string || '';
+  const password = req.headers['x-nextcloud-password'] as string || '';
+
+  if (!host || !username || !password) {
+    return null;
+  }
+
+  return { host, username, password };
 }
 
 // Create MCP server
@@ -156,27 +226,18 @@ const mcpServer = new McpServer({
   version: '1.0.0',
 });
 
-// Initialize credentials from environment or query params
-function initializeCredentials(req?: Request): void {
-  // Check for query params first (user-provided)
-  const host = req?.query.nextcloudHost as string || process.env.NEXTCLOUD_HOST;
-  const username = req?.query.nextcloudUsername as string || process.env.NEXTCLOUD_USERNAME;
-  const password = req?.query.nextcloudPassword as string || process.env.NEXTCLOUD_PASSWORD;
-  
-  if (host && username && password) {
-    setCredentials(host, username, password);
-  }
-}
-
-// Register all tool sets
+// Register all tool sets (skip debug tools in production)
 const toolSets: ToolRegistrationFn[] = [
   registerNotesTools,
   registerCalendarTools,
-  registerCalendarDebugTools,
   registerContactsTools,
   registerTablesTools,
   registerWebDAVTools,
 ];
+
+if (!IS_PRODUCTION) {
+  toolSets.push(registerCalendarDebugTools);
+}
 
 // Register all tools
 toolSets.forEach((toolSet) => toolSet(mcpServer));
@@ -213,17 +274,24 @@ mcpServer.tool(
 // Create Express app
 const app = express();
 
-// Middleware
+// Middleware - restricted CORS
 app.use(cors({
-  origin: '*',
+  origin: (origin, callback) => {
+    // Allow requests with no origin (non-browser clients like curl, MCP clients)
+    if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Accept', 'Authorization', 'Mcp-Session-Id'],
+  allowedHeaders: ['Content-Type', 'Accept', 'Authorization', 'Mcp-Session-Id', 'X-API-Key', 'X-Nextcloud-Host', 'X-Nextcloud-Username', 'X-Nextcloud-Password'],
   exposedHeaders: ['Mcp-Session-Id'],
 }));
 
 app.use(express.json());
 
-// Health check endpoint
+// Health check endpoint (no auth required - used by Docker healthcheck)
 app.get('/health', (req: Request, res: Response) => {
   trackRequest(req, '/health');
   res.json({
@@ -235,25 +303,25 @@ app.get('/health', (req: Request, res: Response) => {
   });
 });
 
-// Analytics endpoint - summary
-app.get('/analytics', (req: Request, res: Response) => {
+// Analytics endpoint - protected by API key
+app.get('/analytics', requireApiKey, (req: Request, res: Response) => {
   trackRequest(req, '/analytics');
-  
+
   const sortedTools = Object.entries(analytics.toolCalls)
     .sort(([, a], [, b]) => b - a)
     .reduce((acc, [k, v]) => ({ ...acc, [k]: v }), {});
-  
+
   const sortedClients = Object.entries(analytics.clientsByIp)
     .sort(([, a], [, b]) => b - a)
     .slice(0, 20)
     .reduce((acc, [k, v]) => ({ ...acc, [k]: v }), {});
-  
+
   const last24Hours = Object.entries(analytics.hourlyRequests)
     .sort(([a], [b]) => b.localeCompare(a))
     .slice(0, 24)
     .reverse()
     .reduce((acc, [k, v]) => ({ ...acc, [k]: v }), {});
-  
+
   res.json({
     server: 'Nextcloud MCP',
     uptime: getUptime(),
@@ -269,7 +337,7 @@ app.get('/analytics', (req: Request, res: Response) => {
       byTool: sortedTools,
     },
     clients: {
-      byIp: sortedClients,
+      byHashedIp: sortedClients,
       byUserAgent: analytics.clientsByUserAgent,
     },
     hourlyRequests: last24Hours,
@@ -277,10 +345,12 @@ app.get('/analytics', (req: Request, res: Response) => {
   });
 });
 
-// Analytics dashboard - visual HTML page
+// Analytics dashboard shell. The HTML is public, but data loading still requires an API key.
 app.get('/analytics/dashboard', (req: Request, res: Response) => {
   trackRequest(req, '/analytics/dashboard');
-  
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Pragma', 'no-cache');
+
   const html = `
 <!DOCTYPE html>
 <html lang="en">
@@ -349,6 +419,48 @@ app.get('/analytics/dashboard', (req: Request, res: Response) => {
       margin-bottom: 16px;
       color: #fff;
     }
+    .auth-card {
+      background: rgba(255,255,255,0.1);
+      border-radius: 12px;
+      padding: 20px;
+      border: 1px solid rgba(255,255,255,0.2);
+      margin-bottom: 20px;
+    }
+    .auth-row {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+    .auth-input {
+      flex: 1 1 320px;
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 10px;
+      background: rgba(0,0,0,0.2);
+      color: #fff;
+      padding: 12px 14px;
+    }
+    .auth-input::placeholder { color: rgba(255,255,255,0.5); }
+    .auth-button {
+      border: 0;
+      border-radius: 10px;
+      padding: 12px 16px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .auth-button.primary {
+      background: #fff;
+      color: #00678c;
+    }
+    .auth-button.secondary {
+      background: rgba(255,255,255,0.14);
+      color: #fff;
+    }
+    .auth-status {
+      margin-top: 10px;
+      color: rgba(255,255,255,0.72);
+      font-size: 0.9rem;
+    }
     .recent-calls {
       background: rgba(255,255,255,0.1);
       border-radius: 12px;
@@ -377,49 +489,86 @@ app.get('/analytics/dashboard', (req: Request, res: Response) => {
 <body>
   <div class="container">
     <header>
-      <h1>☁️ Nextcloud MCP Analytics</h1>
-      <p>Real-time usage statistics for your Nextcloud MCP server</p>
+      <h1>Nextcloud MCP Analytics</h1>
+      <p>Usage statistics for your Nextcloud MCP server</p>
     </header>
-    
+
+    <div class="auth-card">
+      <h2>API Key</h2>
+      <p>Enter your MCP API key to load analytics. The key stays in this tab's session storage and is never added to the URL.</p>
+      <div class="auth-row">
+        <input id="api-key-input" class="auth-input" type="password" placeholder="Paste MCP_API_KEY" autocomplete="off" />
+        <button id="load-dashboard" class="auth-button primary" type="button">Load Dashboard</button>
+        <button id="clear-api-key" class="auth-button secondary" type="button">Clear Key</button>
+      </div>
+      <div id="auth-status" class="auth-status"></div>
+    </div>
+
     <div class="stats-grid" id="stats-grid"></div>
-    
+
     <div class="charts-grid">
       <div class="chart-card">
-        <h2>📊 Tool Usage Distribution</h2>
+        <h2>Tool Usage Distribution</h2>
         <canvas id="toolsChart"></canvas>
       </div>
       <div class="chart-card">
-        <h2>📈 Hourly Requests (Last 24h)</h2>
+        <h2>Hourly Requests (Last 24h)</h2>
         <canvas id="hourlyChart"></canvas>
       </div>
       <div class="chart-card">
-        <h2>📱 Clients by User Agent</h2>
+        <h2>Clients by User Agent</h2>
         <canvas id="clientsChart"></canvas>
       </div>
-      <div class="chart-card">
-        <h2>🌐 Top IPs</h2>
-        <div id="clients-list"></div>
-      </div>
     </div>
-    
+
     <div class="recent-calls">
-      <h2>🔄 Recent Tool Calls</h2>
+      <h2>Recent Tool Calls</h2>
       <div id="recent-calls-list"></div>
     </div>
-    
+
     <p class="refresh-note">Auto-refreshes every 30 seconds</p>
   </div>
-  
+
   <script>
+    const API_KEY_STORAGE_KEY = 'nextcloud_mcp_analytics_api_key';
     let toolsChart, hourlyChart, clientsChart;
-    
-    async function fetchData() {
-      // Use relative path that works with nginx reverse proxy
+    const apiKeyInput = document.getElementById('api-key-input');
+    const authStatus = document.getElementById('auth-status');
+
+    function setAuthStatus(message, isError = false) {
+      authStatus.textContent = message;
+      authStatus.style.color = isError ? '#fecaca' : 'rgba(255,255,255,0.72)';
+    }
+
+    function getApiKey() {
+      return apiKeyInput.value.trim() || sessionStorage.getItem(API_KEY_STORAGE_KEY) || '';
+    }
+
+    function saveApiKey(apiKey) {
+      sessionStorage.setItem(API_KEY_STORAGE_KEY, apiKey);
+      apiKeyInput.value = apiKey;
+    }
+
+    function clearApiKey() {
+      sessionStorage.removeItem(API_KEY_STORAGE_KEY);
+      apiKeyInput.value = '';
+      setAuthStatus('API key cleared for this tab.');
+    }
+
+    async function fetchData(apiKey) {
       const basePath = window.location.pathname.replace('/analytics/dashboard', '');
-      const res = await fetch(basePath + '/analytics');
+      const res = await fetch(basePath + '/analytics', {
+        headers: { 'X-API-Key': apiKey }
+      });
+
+      if (!res.ok) {
+        const errorBody = await res.json().catch(() => null);
+        throw new Error(errorBody?.error?.message || \`Request failed with status \${res.status}\`);
+      }
+
       return res.json();
     }
-    
+
     function updateStats(data) {
       document.getElementById('stats-grid').innerHTML = \`
         <div class="stat-card">
@@ -440,11 +589,11 @@ app.get('/analytics/dashboard', (req: Request, res: Response) => {
         </div>
       \`;
     }
-    
+
     function updateCharts(data) {
       const toolLabels = Object.keys(data.breakdown.byTool).slice(0, 10);
       const toolValues = Object.values(data.breakdown.byTool).slice(0, 10);
-      
+
       if (toolsChart) toolsChart.destroy();
       toolsChart = new Chart(document.getElementById('toolsChart'), {
         type: 'doughnut',
@@ -463,10 +612,10 @@ app.get('/analytics/dashboard', (req: Request, res: Response) => {
           plugins: { legend: { position: 'right', labels: { color: '#fff' } } }
         }
       });
-      
+
       const hourlyLabels = Object.keys(data.hourlyRequests).map(h => h.split('T')[1] || h);
       const hourlyValues = Object.values(data.hourlyRequests);
-      
+
       if (hourlyChart) hourlyChart.destroy();
       hourlyChart = new Chart(document.getElementById('hourlyChart'), {
         type: 'line',
@@ -490,11 +639,10 @@ app.get('/analytics/dashboard', (req: Request, res: Response) => {
           plugins: { legend: { labels: { color: '#fff' } } }
         }
       });
-      
-      // Clients by User Agent chart
+
       const clientLabels = Object.keys(data.clients.byUserAgent).slice(0, 8);
       const clientValues = Object.values(data.clients.byUserAgent).slice(0, 8);
-      
+
       if (clientsChart) clientsChart.destroy();
       clientsChart = new Chart(document.getElementById('clientsChart'), {
         type: 'bar',
@@ -504,7 +652,7 @@ app.get('/analytics/dashboard', (req: Request, res: Response) => {
             label: 'Requests',
             data: clientValues,
             backgroundColor: [
-              '#0082c9', '#00678c', '#a0d8ef', '#5bc0de', 
+              '#0082c9', '#00678c', '#a0d8ef', '#5bc0de',
               '#4a90d9', '#3498db', '#2980b9', '#1abc9c'
             ]
           }]
@@ -519,18 +667,8 @@ app.get('/analytics/dashboard', (req: Request, res: Response) => {
           plugins: { legend: { display: false } }
         }
       });
-      
-      // Top IPs list
-      const ipList = document.getElementById('clients-list');
-      const topIps = Object.entries(data.clients.byIp).slice(0, 10);
-      ipList.innerHTML = topIps.map(([ip, count]) => \`
-        <div class="call-item">
-          <span class="call-tool">\${ip}</span>
-          <span class="call-time">\${count} requests</span>
-        </div>
-      \`).join('') || '<p style="color: rgba(255,255,255,0.6);">No data yet</p>';
     }
-    
+
     function updateRecentCalls(data) {
       const list = document.getElementById('recent-calls-list');
       list.innerHTML = data.recentToolCalls.slice(0, 10).map(call => \`
@@ -540,16 +678,49 @@ app.get('/analytics/dashboard', (req: Request, res: Response) => {
         </div>
       \`).join('');
     }
-    
+
     async function refresh() {
-      const data = await fetchData();
-      updateStats(data);
-      updateCharts(data);
-      updateRecentCalls(data);
+      const apiKey = getApiKey();
+      if (!apiKey) {
+        setAuthStatus('Enter your API key to load analytics.');
+        return;
+      }
+
+      saveApiKey(apiKey);
+      setAuthStatus('Loading analytics...');
+
+      try {
+        const data = await fetchData(apiKey);
+        updateStats(data);
+        updateCharts(data);
+        updateRecentCalls(data);
+        setAuthStatus('Analytics loaded. API key is stored only in session storage for this tab.');
+      } catch (error) {
+        setAuthStatus(error instanceof Error ? error.message : 'Failed to load analytics.', true);
+      }
     }
-    
-    refresh();
-    setInterval(refresh, 30000);
+
+    document.getElementById('load-dashboard').addEventListener('click', refresh);
+    document.getElementById('clear-api-key').addEventListener('click', clearApiKey);
+    apiKeyInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        refresh();
+      }
+    });
+
+    const storedApiKey = sessionStorage.getItem(API_KEY_STORAGE_KEY);
+    if (storedApiKey) {
+      apiKeyInput.value = storedApiKey;
+      refresh();
+    } else {
+      setAuthStatus('Enter your API key to load analytics. It will not be placed in the URL.');
+    }
+
+    setInterval(() => {
+      if (sessionStorage.getItem(API_KEY_STORAGE_KEY)) {
+        refresh();
+      }
+    }, 30000);
   </script>
 </body>
 </html>
@@ -562,21 +733,82 @@ const transport = new StreamableHTTPServerTransport({
   sessionIdGenerator: undefined,
 });
 
-// MCP endpoint
+// MCP endpoint - dual-mode authentication
 app.all('/mcp', async (req: Request, res: Response) => {
   trackRequest(req, '/mcp');
-  
-  // Initialize credentials from query params or env
-  initializeCredentials(req);
-  
+
+  let credentials: { host: string; username: string; password: string } | null = null;
+
+  const apiKey = (req.headers['x-api-key'] as string) || (req.query.api_key as string);
+
+  if (isKeyServiceEnabled()) {
+    // --- Key Service Mode ---
+    if (!apiKey) {
+      res.status(403).json({
+        jsonrpc: '2.0',
+        error: { code: -32600, message: 'Missing api_key parameter.' },
+        id: null,
+      });
+      return;
+    }
+
+    const result = await resolveKeyCredentials(apiKey);
+    if (!result.ok) {
+      const status = result.reason === 'invalid_key' ? 403 : 503;
+      const message = result.reason === 'service_unavailable'
+        ? 'Authentication service temporarily unavailable. Try again later.'
+        : result.reason === 'malformed_response'
+          ? 'Authentication service returned incomplete credentials.'
+          : 'Invalid or expired API key.';
+      res.status(status).json({
+        jsonrpc: '2.0',
+        error: { code: -32600, message },
+        id: null,
+      });
+      return;
+    }
+
+    credentials = result.credentials;
+  } else {
+    // --- Self-Hosted Mode ---
+    if (!validateApiKey(req)) {
+      res.status(403).json({
+        jsonrpc: '2.0',
+        error: {
+          code: -32600,
+          message: 'Forbidden: Invalid or missing API key. Provide a valid X-API-Key header.',
+        },
+        id: null,
+      });
+      return;
+    }
+
+    credentials = extractCredentials(req);
+    if (!credentials) {
+      res.status(401).json({
+        jsonrpc: '2.0',
+        error: {
+          code: -32600,
+          message: 'Missing Nextcloud credentials. Provide X-Nextcloud-Host, X-Nextcloud-Username, and X-Nextcloud-Password headers.',
+        },
+        id: null,
+      });
+      return;
+    }
+  }
+
   // Track tool calls
   if (req.body?.method === 'tools/call' && req.body?.params?.name) {
-    const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0] || req.ip || 'unknown';
-    trackToolCall(req.body.params.name, clientIp);
+    trackToolCall(req.body.params.name);
   }
-  
+
+  // Create per-request client set and run within isolated context
+  const clientSet = createClientSet(credentials.host, credentials.username, credentials.password);
+
   try {
-    await transport.handleRequest(req, res, req.body);
+    await runWithClients(clientSet, async () => {
+      await transport.handleRequest(req, res, req.body);
+    });
   } catch (error) {
     console.error('MCP request error:', error);
     if (!res.headersSent) {
@@ -592,7 +824,7 @@ app.all('/mcp', async (req: Request, res: Response) => {
   }
 });
 
-// Root endpoint with server info
+// Root endpoint with server info (no credentials or sensitive data exposed)
 app.get('/', (req: Request, res: Response) => {
   trackRequest(req, '/');
   res.json({
@@ -603,14 +835,24 @@ app.get('/', (req: Request, res: Response) => {
     endpoints: {
       mcp: '/mcp',
       health: '/health',
-      analytics: '/analytics',
-      analyticsDashboard: '/analytics/dashboard',
     },
-    authentication: {
-      description: 'Provide Nextcloud credentials via query params or environment variables',
-      queryParams: ['nextcloudHost', 'nextcloudUsername', 'nextcloudPassword'],
-      example: '/mcp?nextcloudHost=https://cloud.example.com&nextcloudUsername=user&nextcloudPassword=pass',
-    },
+    authentication: isKeyServiceEnabled()
+      ? {
+          mode: 'key-service',
+          description: 'Provide a user API key. Credentials are resolved via the MCP Key Service.',
+          queryParam: 'api_key',
+          example: '/mcp?api_key=usr_XXXXXXXX',
+        }
+      : {
+          mode: 'self-hosted',
+          description: 'Provide an API key and Nextcloud credentials via headers.',
+          headers: {
+            'X-API-Key': 'Server API key (required)',
+            'X-Nextcloud-Host': 'Nextcloud server URL',
+            'X-Nextcloud-Username': 'Nextcloud username',
+            'X-Nextcloud-Password': 'Nextcloud app password',
+          },
+        },
     documentation: 'https://github.com/hithereiamaliff/mcp-nextcloud',
   });
 });
@@ -620,12 +862,18 @@ mcpServer.server.connect(transport)
   .then(() => {
     app.listen(PORT, HOST, () => {
       console.log('='.repeat(60));
-      console.log('☁️ Nextcloud MCP Server (Streamable HTTP)');
+      console.log('Nextcloud MCP Server (Streamable HTTP)');
       console.log('='.repeat(60));
-      console.log(`📍 Server running on http://${HOST}:${PORT}`);
-      console.log(`📡 MCP endpoint: http://${HOST}:${PORT}/mcp`);
-      console.log(`❤️  Health check: http://${HOST}:${PORT}/health`);
-      console.log(`📊 Analytics: http://${HOST}:${PORT}/analytics/dashboard`);
+      console.log(`Server running on http://${HOST}:${PORT}`);
+      console.log(`MCP endpoint: http://${HOST}:${PORT}/mcp`);
+      console.log(`Health check: http://${HOST}:${PORT}/health`);
+      if (isKeyServiceEnabled()) {
+        console.log(`Auth mode: Key Service (${process.env.KEY_SERVICE_URL})`);
+        console.log(`Analytics auth: ${MCP_API_KEY ? 'configured' : 'NOT SET (/analytics disabled)'}`);
+      } else {
+        console.log(`Auth mode: Self-hosted (MCP_API_KEY: ${MCP_API_KEY ? 'configured' : 'NOT SET'})`);
+      }
+      console.log(`Debug tools: ${IS_PRODUCTION ? 'disabled (production)' : 'enabled (development)'}`);
       console.log('='.repeat(60));
       console.log('');
     });

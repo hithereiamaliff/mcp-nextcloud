@@ -11,11 +11,12 @@ services:
     environment:
       - PORT=8080
       - HOST=0.0.0.0
-      - NEXTCLOUD_HOST=${NEXTCLOUD_HOST:-}
-      - NEXTCLOUD_USERNAME=${NEXTCLOUD_USERNAME:-}
-      - NEXTCLOUD_PASSWORD=${NEXTCLOUD_PASSWORD:-}
       - NODE_ENV=production
       - ANALYTICS_FILE=/app/data/analytics.json
+      - MCP_API_KEY=${MCP_API_KEY:-}
+      - KEY_SERVICE_URL=${KEY_SERVICE_URL:-}
+      - KEY_SERVICE_TOKEN=${KEY_SERVICE_TOKEN:-}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-https://smithery.ai,https://claude.ai}
     volumes:
       - analytics-data:/app/data
     healthcheck:

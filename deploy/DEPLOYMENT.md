@@ -53,14 +53,28 @@ cp .env.sample .env
 nano .env
 ```
 
-Add your Nextcloud credentials:
+Add your server configuration:
 ```env
-NEXTCLOUD_HOST=https://your-nextcloud-instance.com
-NEXTCLOUD_USERNAME=your_username
-NEXTCLOUD_PASSWORD=your_app_password
+# --- Choose one auth mode ---
+
+# Option A: Key Service mode (multi-user, recommended for hosted deployment)
+MCP_API_KEY=your-generated-api-key-here  # required for /analytics admin access
+KEY_SERVICE_URL=https://mcpkeys.techmavie.digital/internal/resolve
+KEY_SERVICE_TOKEN=your-key-service-bearer-token
+
+# Option B: Self-hosted mode (single-operator)
+# Leave KEY_SERVICE_URL and KEY_SERVICE_TOKEN unset, then keep MCP_API_KEY set.
+# MCP_API_KEY=your-generated-api-key-here  # openssl rand -hex 32
+
+# --- Optional ---
+ALLOWED_ORIGINS=https://smithery.ai,https://claude.ai
 ```
 
-> **Note:** It's recommended to use an App Password instead of your main password. Generate one in Nextcloud: Settings → Security → Devices & sessions → Create new app password.
+> **Security Notes:**
+> - Do NOT add `NEXTCLOUD_HOST`, `NEXTCLOUD_USERNAME`, or `NEXTCLOUD_PASSWORD` to this file. The HTTP server never uses environment variables for Nextcloud credentials.
+> - In Key Service mode, user API keys (`usr_...`) are resolved automatically.
+> - In Self-Hosted mode, each client provides credentials via `X-Nextcloud-*` headers.
+> - Generate a strong API key: `openssl rand -hex 32`
 
 ### 5. Build and start the Docker container
 
@@ -102,52 +116,69 @@ sudo systemctl reload nginx
 ### 9. Test the MCP endpoint
 
 ```bash
-# Test health endpoint through nginx
+# Test health endpoint (no auth required)
 curl https://mcp.techmavie.digital/nextcloud/health
 
-# Test MCP endpoint
+# Test MCP endpoint — Key Service mode
+curl -X POST "https://mcp.techmavie.digital/nextcloud/mcp?api_key=usr_XXXXXXXX" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+
+# Test MCP endpoint — Self-Hosted mode
 curl -X POST https://mcp.techmavie.digital/nextcloud/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json" \
+  -H "X-API-Key: your-api-key" \
+  -H "X-Nextcloud-Host: https://cloud.example.com" \
+  -H "X-Nextcloud-Username: your_user" \
+  -H "X-Nextcloud-Password: your_app_password" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
 ## Client Configuration
 
-### For Claude Desktop / Cursor / Windsurf
-
-Add to your MCP configuration:
+### Key Service Mode (recommended)
 
 ```json
 {
   "mcpServers": {
     "nextcloud": {
       "transport": "streamable-http",
-      "url": "https://mcp.techmavie.digital/nextcloud/mcp"
+      "url": "https://mcp.techmavie.digital/nextcloud/mcp?api_key=usr_XXXXXXXX"
     }
   }
 }
 ```
 
-### With Credentials via Query Params (if not using .env)
+### Self-Hosted Mode (requires custom headers)
 
 ```json
 {
   "mcpServers": {
     "nextcloud": {
       "transport": "streamable-http",
-      "url": "https://mcp.techmavie.digital/nextcloud/mcp?nextcloudHost=https://cloud.example.com&nextcloudUsername=user&nextcloudPassword=pass"
+      "url": "https://mcp.techmavie.digital/nextcloud/mcp",
+      "headers": {
+        "X-API-Key": "your-api-key",
+        "X-Nextcloud-Host": "https://cloud.example.com",
+        "X-Nextcloud-Username": "your_user",
+        "X-Nextcloud-Password": "your_app_password"
+      }
     }
   }
 }
 ```
+
+> If your MCP client cannot send custom headers, use Key Service mode or the local CLI/stdio mode.
 
 ### For MCP Inspector
 
 ```bash
 npx @modelcontextprotocol/inspector
 # Select "Streamable HTTP"
-# Enter URL: https://mcp.techmavie.digital/nextcloud/mcp
+# Key Service mode: Enter URL with ?api_key=usr_XXXXXXXX
+# Self-Hosted mode: Enter URL and add headers: X-API-Key, X-Nextcloud-Host, X-Nextcloud-Username, X-Nextcloud-Password
 ```
 
 ## Management Commands
@@ -199,9 +230,10 @@ Set these in your repository settings (Settings → Secrets and variables → Ac
 |----------|---------|-------------|
 | `PORT` | 8080 | HTTP server port (internal) |
 | `HOST` | 0.0.0.0 | Bind address |
-| `NEXTCLOUD_HOST` | (required) | Your Nextcloud instance URL |
-| `NEXTCLOUD_USERNAME` | (required) | Nextcloud username |
-| `NEXTCLOUD_PASSWORD` | (required) | Nextcloud password or app password |
+| `MCP_API_KEY` | - | API key for self-hosted `/mcp` auth and `/analytics` admin access |
+| `KEY_SERVICE_URL` | - | MCP Key Service endpoint (enables key service mode) |
+| `KEY_SERVICE_TOKEN` | - | Bearer token for key service authentication |
+| `ALLOWED_ORIGINS` | `https://smithery.ai,https://claude.ai` | Comma-separated list of browser origins allowed by CORS |
 
 ## Analytics Dashboard
 
@@ -209,6 +241,7 @@ The MCP server includes a built-in analytics dashboard:
 
 - **Dashboard:** `https://mcp.techmavie.digital/nextcloud/analytics/dashboard`
 - **API:** `https://mcp.techmavie.digital/nextcloud/analytics`
+- Enter the API key inside the dashboard page when prompted. Do not add it to the URL.
 
 Features:
 - Total requests and tool calls
@@ -240,13 +273,13 @@ docker compose logs mcp-nextcloud
 ### Test MCP connection
 
 ```bash
-# List tools
-curl -X POST https://mcp.techmavie.digital/nextcloud/mcp \
+# List tools (Key Service mode)
+curl -X POST "https://mcp.techmavie.digital/nextcloud/mcp?api_key=usr_XXXXXXXX" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 
-# Call hello tool
-curl -X POST https://mcp.techmavie.digital/nextcloud/mcp \
+# Call hello tool (Key Service mode)
+curl -X POST "https://mcp.techmavie.digital/nextcloud/mcp?api_key=usr_XXXXXXXX" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"nextcloud_hello","arguments":{}}}'
 ```
@@ -263,6 +296,8 @@ Based on your existing MCP servers:
 ## Security Notes
 
 - The MCP server runs behind nginx with SSL
-- Credentials can be provided via environment variables (recommended) or query params
+- In Key Service mode, user API keys are resolved server-side — no raw credentials in transit from the client
+- In Self-Hosted mode, each request requires `X-API-Key` plus `X-Nextcloud-*` headers
+- The HTTP server never uses `NEXTCLOUD_*` environment variables for credentials
 - Use App Passwords instead of your main Nextcloud password
 - Consider adding rate limiting at nginx level if needed

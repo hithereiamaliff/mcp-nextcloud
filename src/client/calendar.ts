@@ -57,13 +57,12 @@ export class CalendarClient extends BaseNextcloudClient {
             }];
           }
         } catch (error) {
-          console.log('No default personal calendar found');
+          // No default personal calendar found
         }
       }
       
       return calendars;
     } catch (error) {
-      console.error('Error listing calendars:', error);
       return [];
     }
   }
@@ -168,15 +167,12 @@ export class CalendarClient extends BaseNextcloudClient {
       const parsed = this.xmlParser.parse(xmlResponse);
       const calendars: Calendar[] = [];
 
-      console.log('Parsed calendar XML structure:', JSON.stringify(parsed, null, 2));
-
       // Try different namespace variations for multistatus
       const multistatus = parsed['d:multistatus'] ||
                          parsed['D:multistatus'] ||
                          parsed.multistatus;
       
       if (!multistatus) {
-        console.log('No multistatus element found in calendar response');
         return [];
       }
 
@@ -185,7 +181,6 @@ export class CalendarClient extends BaseNextcloudClient {
                        multistatus.response;
 
       if (!responses) {
-        console.log('No response elements found in calendar multistatus');
         return [];
       }
 
@@ -201,7 +196,6 @@ export class CalendarClient extends BaseNextcloudClient {
                        response.propstat;
         
         if (!propstats) {
-          console.log('No propstat found for calendar href:', href);
           continue;
         }
 
@@ -222,7 +216,6 @@ export class CalendarClient extends BaseNextcloudClient {
         }
                     
         if (!prop) {
-          console.log('No 200 OK prop found for calendar href:', href);
           continue;
         }
 
@@ -234,13 +227,6 @@ export class CalendarClient extends BaseNextcloudClient {
           resourcetype['cal:calendar'] !== undefined ||
           resourcetype.calendar !== undefined
         );
-        
-        console.log('Checking resource:', {
-          href,
-          isCalendar,
-          resourcetype: JSON.stringify(resourcetype),
-          propKeys: Object.keys(prop)
-        });
         
         if (isCalendar) {
           const displayname = prop['d:displayname'] || '';
@@ -258,8 +244,6 @@ export class CalendarClient extends BaseNextcloudClient {
           const pathParts = href.split('/');
           const id = pathParts[pathParts.length - 2] || pathParts[pathParts.length - 1];
 
-          console.log('Found calendar:', { id, displayname, href, ctag });
-
           if (id && id !== 'calendars' && id !== this.username) {
             calendars.push({
               id,
@@ -274,11 +258,8 @@ export class CalendarClient extends BaseNextcloudClient {
         }
       }
 
-      console.log(`Found ${calendars.length} calendars`);
       return calendars;
     } catch (error) {
-      console.error('Error parsing calendars response:', error);
-      console.error('XML Response:', xmlResponse);
       return [];
     }
   }
@@ -310,12 +291,6 @@ export class CalendarClient extends BaseNextcloudClient {
                             prop['calendar-data'];
 
         if (calendarData && href.endsWith('.ics')) {
-          console.log('Found event iCalendar:', {
-            href,
-            calendarDataLength: calendarData.length,
-            calendarDataPreview: calendarData.substring(0, 100)
-          });
-          
           // Decode HTML entities
           const decodedIcal = this.decodeHtmlEntities(calendarData);
           const event = this.parseICalendar(decodedIcal);
@@ -330,18 +305,11 @@ export class CalendarClient extends BaseNextcloudClient {
             uri: href,
             ...event
           });
-        } else if (href) {
-          console.log('Skipping non-iCalendar resource:', href, {
-            hasCalendarData: !!calendarData,
-            calendarDataKeys: Object.keys(prop).filter(k => k.includes('calendar'))
-          });
         }
       }
 
       return events;
     } catch (error) {
-      console.error('Error parsing events response:', error);
-      console.error('XML Response:', xmlResponse);
       return [];
     }
   }

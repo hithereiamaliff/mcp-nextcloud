@@ -2,8 +2,6 @@
 
 **MCP Endpoint:** `https://mcp.techmavie.digital/nextcloud/mcp`
 
-**Analytics Dashboard:** [`https://mcp.techmavie.digital/nextcloud/analytics/dashboard`](https://mcp.techmavie.digital/nextcloud/analytics/dashboard)
-
 > **Note:** This project is a complete rewrite in TypeScript of the original Python-based [cbcoutinho/nextcloud-mcp-server](https://github.com/cbcoutinho/nextcloud-mcp-server), now with **self-hosted VPS deployment** and **Smithery deployment support**.
 >
 > ### Key Differences from the Original Repository:
@@ -270,6 +268,7 @@ NEXTCLOUD_PASSWORD=your_nextcloud_app_password
 
 Add to your MCP client configuration (e.g., Claude Desktop, Continue, etc.):
 
+**For CLI mode (local, single-user):**
 ```json
 {
   "mcpServers": {
@@ -279,6 +278,36 @@ Add to your MCP client configuration (e.g., Claude Desktop, Continue, etc.):
         "NEXTCLOUD_HOST": "https://your.nextcloud.instance.com",
         "NEXTCLOUD_USERNAME": "your_username",
         "NEXTCLOUD_PASSWORD": "your_app_password"
+      }
+    }
+  }
+}
+```
+
+**For hosted HTTP mode (via MCP Key Service):**
+```json
+{
+  "mcpServers": {
+    "nextcloud": {
+      "transport": "streamable-http",
+      "url": "https://mcp.techmavie.digital/nextcloud/mcp?api_key=usr_XXXXXXXX"
+    }
+  }
+}
+```
+
+**For self-hosted HTTP mode (your own server):**
+```json
+{
+  "mcpServers": {
+    "nextcloud": {
+      "transport": "streamable-http",
+      "url": "https://mcp.techmavie.digital/nextcloud/mcp",
+      "headers": {
+        "X-API-Key": "your-server-api-key",
+        "X-Nextcloud-Host": "https://your.nextcloud.instance.com",
+        "X-Nextcloud-Username": "your_username",
+        "X-Nextcloud-Password": "your_app_password"
       }
     }
   }
@@ -318,18 +347,34 @@ Add to your MCP client configuration (e.g., Claude Desktop, Continue, etc.):
 Create a `.env` file in the root directory based on `.env.sample`:
 
 ```dotenv
-# .env
+# --- CLI/stdio mode only ---
+# These are used when running the server in CLI mode (npm run dev, npm run cli).
+# They are NOT used by the HTTP server.
 NEXTCLOUD_HOST=https://your.nextcloud.instance.com
 NEXTCLOUD_USERNAME=your_nextcloud_username
-NEXTCLOUD_PASSWORD=your_nextcloud_app_password_or_login_password
+NEXTCLOUD_PASSWORD=your_nextcloud_app_password
+
+# --- HTTP server: Self-Hosted mode ---
+# Required for self-hosted /mcp auth, and also used for /analytics access.
+MCP_API_KEY=your-secret-api-key-here
+
+# --- HTTP server: Key Service mode ---
+# Set both to enable user api_key=usr_... resolution via the MCP Key Service.
+KEY_SERVICE_URL=https://mcpkeys.techmavie.digital/internal/resolve
+KEY_SERVICE_TOKEN=your-key-service-bearer-token
+
+# Optional: Comma-separated list of allowed CORS origins.
+ALLOWED_ORIGINS=https://smithery.ai,https://claude.ai
 ```
 
-**Important Security Note:** Use a dedicated Nextcloud App Password instead of your regular login password. Generate one in your Nextcloud Security settings.
+**Important Security Notes:**
+- Use a dedicated Nextcloud App Password instead of your regular login password. Generate one in your Nextcloud Security settings.
+- In HTTP mode, `NEXTCLOUD_*` environment variables are **never used**. Self-hosted clients provide credentials via `X-Nextcloud-*` headers, while key-service clients send only `api_key=usr_...`.
+- Generate a strong API key: `openssl rand -hex 32`
 
 ### Smithery Configuration
 
 When deploying via Smithery, you can configure credentials through:
-- Environment variables (as above)
 - Smithery configuration interface (recommended for cloud deployment)
 
 ## Deployment & Usage
@@ -340,28 +385,22 @@ The easiest way to use this MCP server is via the hosted endpoint. **No installa
 
 **Endpoint:** `https://mcp.techmavie.digital/nextcloud/mcp`
 
-#### Authentication via URL Query Parameters
+#### Authentication
 
-You can provide your Nextcloud credentials directly in the URL:
+The hosted server uses the **MCP Key Service** for authentication. You get a personal API key (`usr_XXXXXXXX`) from the portal, and the server resolves your Nextcloud credentials automatically.
 
 ```
-https://mcp.techmavie.digital/nextcloud/mcp?nextcloudHost=https://cloud.example.com&nextcloudUsername=your_user&nextcloudPassword=your_app_password
+https://mcp.techmavie.digital/nextcloud/mcp?api_key=usr_XXXXXXXX
 ```
 
-| Parameter | Description | Example |
-|-----------|-------------|---------|
-| `nextcloudHost` | Your Nextcloud instance URL | `https://cloud.example.com` |
-| `nextcloudUsername` | Your Nextcloud username | `john` |
-| `nextcloudPassword` | Your Nextcloud app password | `xxxxx-xxxxx-xxxxx-xxxxx` |
-
-#### Client Configuration (Claude Desktop / Cursor / Windsurf)
+#### Client Configuration
 
 ```json
 {
   "mcpServers": {
     "nextcloud": {
       "transport": "streamable-http",
-      "url": "https://mcp.techmavie.digital/nextcloud/mcp?nextcloudHost=https://cloud.example.com&nextcloudUsername=your_user&nextcloudPassword=your_app_password"
+      "url": "https://mcp.techmavie.digital/nextcloud/mcp?api_key=usr_XXXXXXXX"
     }
   }
 }
@@ -372,7 +411,7 @@ https://mcp.techmavie.digital/nextcloud/mcp?nextcloudHost=https://cloud.example.
 ```bash
 npx @modelcontextprotocol/inspector
 # Select "Streamable HTTP"
-# Enter URL: https://mcp.techmavie.digital/nextcloud/mcp?nextcloudHost=...&nextcloudUsername=...&nextcloudPassword=...
+# Enter URL: https://mcp.techmavie.digital/nextcloud/mcp?api_key=usr_XXXXXXXX
 ```
 
 ### Option 2: Self-Hosted (VPS)
@@ -380,6 +419,11 @@ npx @modelcontextprotocol/inspector
 If you prefer to run your own instance, see [deploy/DEPLOYMENT.md](deploy/DEPLOYMENT.md) for detailed VPS deployment instructions with Docker and Nginx.
 
 ```bash
+# Set required environment variables
+export MCP_API_KEY=your-secret-api-key  # Required for self-hosted /mcp auth and /analytics
+export KEY_SERVICE_URL=https://mcpkeys.techmavie.digital/internal/resolve  # Optional: enables key service mode
+export KEY_SERVICE_TOKEN=your-key-service-bearer-token                      # Optional: enables key service mode
+
 # Using Docker
 docker compose up -d --build
 
@@ -387,6 +431,8 @@ docker compose up -d --build
 npm run build
 npm run start:http
 ```
+
+> **Important:** The HTTP server does NOT use `NEXTCLOUD_*` environment variables. In self-hosted mode, each client must provide Nextcloud credentials via request headers. In key-service mode, clients send only `api_key=usr_...`.
 
 ### Option 3: npm Package (CLI)
 
@@ -396,6 +442,8 @@ Install and run as a local MCP server:
 npm install -g mcp-nextcloud
 mcp-nextcloud
 ```
+
+> **Note:** In CLI mode, credentials are read from environment variables (`NEXTCLOUD_HOST`, `NEXTCLOUD_USERNAME`, `NEXTCLOUD_PASSWORD`). This is safe because CLI mode runs locally for a single user.
 
 ### Option 4: Smithery Deployment
 
@@ -455,6 +503,39 @@ This project includes full Smithery support with:
 - **One-click deployment**: Deploy to cloud with a single command
 - **Configuration management**: Secure credential handling
 - **Playground integration**: Immediate testing interface
+
+## Security
+
+### HTTP Server Security Model
+
+The HTTP server (`http-server.ts`) supports two authentication modes:
+
+**Key Service Mode** (hosted/multi-user):
+- User API keys (`usr_...`) are resolved via the MCP Key Service which returns encrypted Nextcloud credentials.
+- No raw credentials are sent by the client - only the API key.
+- Credentials are cached for 60 seconds to reduce key service load, then re-validated.
+
+**Self-Hosted Mode** (single-operator):
+- A server-side `MCP_API_KEY` validates access.
+- Each client provides Nextcloud credentials via `X-Nextcloud-*` headers.
+
+**Common security measures:**
+- **Per-Request Credential Isolation**: Each request gets its own isolated set of Nextcloud clients via `AsyncLocalStorage`. No credential state is shared between requests.
+- **No Environment Variable Fallback**: The HTTP server never falls back to `NEXTCLOUD_*` environment variables for credentials. These are only used in CLI mode.
+- **Restricted CORS**: Only origins listed in `ALLOWED_ORIGINS` are permitted (defaults to `smithery.ai` and `claude.ai`).
+- **Protected Analytics**: The `/analytics` endpoint requires `MCP_API_KEY` authentication in both modes. The dashboard page stores the key in session storage, never in the URL. Client IPs are hashed before storage.
+- **Debug Tools Disabled in Production**: Calendar debug tools are automatically disabled when `NODE_ENV=production`.
+
+### Self-Hosting Checklist
+
+If you deploy your own instance:
+
+1. Choose an auth mode: set `KEY_SERVICE_URL` + `KEY_SERVICE_TOKEN` for key service, or `MCP_API_KEY` for self-hosted
+2. Set `MCP_API_KEY` for analytics access (required in both modes)
+3. Do NOT set `NEXTCLOUD_*` environment variables on the HTTP server
+4. Use HTTPS (TLS) for all connections
+5. Configure `ALLOWED_ORIGINS` to restrict which domains can connect
+6. Use Nextcloud App Passwords (not your main login password)
 
 ## Troubleshooting
 

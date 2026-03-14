@@ -30,12 +30,10 @@ export class ContactsClient extends BaseNextcloudClient {
         },
       });
 
-      console.log('Raw addressbooks response:', response);
       const addressBooks = this.parseAddressBooksResponse(response);
       
       // If no address books found, assume default "contacts" exists
       if (addressBooks.length === 0) {
-        console.log('No address books discovered, returning default "contacts"');
         return [{
           id: 'contacts',
           displayName: 'Contacts',
@@ -46,9 +44,6 @@ export class ContactsClient extends BaseNextcloudClient {
       
       return addressBooks;
     } catch (error) {
-      console.error('Error listing address books:', error);
-      console.error('Error details:', error);
-      
       // Return default contacts as fallback
       return [{
         id: 'contacts',
@@ -122,11 +117,8 @@ export class ContactsClient extends BaseNextcloudClient {
         },
       });
 
-      console.log('Raw contacts response:', response);
       return this.parseContactsResponse(response);
     } catch (error) {
-      console.error('Error listing contacts:', error);
-      console.error('Error details:', error);
       return [];
     }
   }
@@ -210,8 +202,6 @@ export class ContactsClient extends BaseNextcloudClient {
           const pathParts = href.split('/');
           const id = pathParts[pathParts.length - 2] || pathParts[pathParts.length - 1];
 
-          console.log('Found addressbook:', { id, displayname, href, ctag });
-
           if (id && id !== 'users' && id !== this.username) {
             addressBooks.push({
               id,
@@ -225,8 +215,6 @@ export class ContactsClient extends BaseNextcloudClient {
 
       return addressBooks;
     } catch (error) {
-      console.error('Error parsing addressbooks response:', error);
-      console.error('XML Response:', xmlResponse);
       return [];
     }
   }
@@ -236,15 +224,12 @@ export class ContactsClient extends BaseNextcloudClient {
       const parsed = this.xmlParser.parse(xmlResponse);
       const contacts: Contact[] = [];
 
-      console.log('Parsed XML structure:', JSON.stringify(parsed, null, 2));
-
       // Try different namespace variations for multistatus
       const multistatus = parsed['d:multistatus'] ||
                          parsed['D:multistatus'] ||
                          parsed.multistatus;
       
       if (!multistatus) {
-        console.log('No multistatus element found in response');
         return [];
       }
 
@@ -253,7 +238,6 @@ export class ContactsClient extends BaseNextcloudClient {
                        multistatus.response;
 
       if (!responses) {
-        console.log('No response elements found in multistatus');
         return [];
       }
 
@@ -269,7 +253,6 @@ export class ContactsClient extends BaseNextcloudClient {
                         response.propstat;
         
         if (!propstat) {
-          console.log('No propstat found for href:', href);
           continue;
         }
 
@@ -278,7 +261,6 @@ export class ContactsClient extends BaseNextcloudClient {
                     propstat.prop;
                     
         if (!prop) {
-          console.log('No prop found for href:', href);
           continue;
         }
 
@@ -288,12 +270,6 @@ export class ContactsClient extends BaseNextcloudClient {
                            prop['address-data'];
 
         if (addressData && href.endsWith('.vcf')) {
-          console.log('Found contact vCard:', {
-            href,
-            addressDataLength: addressData.length,
-            addressDataPreview: addressData.substring(0, 100)
-          });
-          
           // Decode HTML entities
           const decodedVCard = this.decodeHtmlEntities(addressData);
           const contact = this.parseVCard(decodedVCard);
@@ -308,19 +284,11 @@ export class ContactsClient extends BaseNextcloudClient {
             uri: href,
             ...contact
           });
-        } else if (href) {
-          console.log('Skipping non-vCard resource:', href, {
-            hasAddressData: !!addressData,
-            addressDataKeys: Object.keys(prop).filter(k => k.includes('address'))
-          });
         }
       }
 
-      console.log(`Found ${contacts.length} contacts`);
       return contacts;
     } catch (error) {
-      console.error('Error parsing contacts response:', error);
-      console.error('XML Response:', xmlResponse);
       return [];
     }
   }

@@ -60,41 +60,17 @@ export class BaseNextcloudClient {
         responseType: 'text' as const,
       };
       
-      console.log('Making WebDAV request:', {
-        method: webdavConfig.method,
-        url: webdavConfig.url,
-        headers: webdavConfig.headers,
-        data: webdavConfig.data ? 'XML data provided' : 'No data'
-      });
-      
       const response = await this.client.request<string>(webdavConfig);
-      
-      console.log('WebDAV response:', {
-        status: response.status,
-        statusText: response.statusText,
-        headers: response.headers,
-        dataLength: response.data?.length || 0,
-        dataPreview: response.data?.substring(0, 500) || 'No data'
-      });
       
       return response.data;
     } catch (error) {
       if (axios.isAxiosError(error)) {
-        console.error('WebDAV request failed:', {
-          status: error.response?.status,
-          statusText: error.response?.statusText,
-          headers: error.response?.headers,
-          data: error.response?.data,
-          message: error.message
-        });
-        
         // Return the response data even for non-2xx status codes, as WebDAV can return useful data
         if (error.response?.data) {
           return error.response.data as string;
         }
         throw new Error(`Nextcloud WebDAV request failed: ${error.message} (Status: ${error.response?.status})`);
       } else {
-        console.error('Unexpected error:', error);
         throw new Error(`An unexpected error occurred: ${error}`);
       }
     }

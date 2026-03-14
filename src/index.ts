@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { setCredentials } from './utils/client-manager.js';
+import { createClientSet, runWithClients } from './utils/client-manager.js';
 
 // Import tool registration functions
 import { registerNotesTools } from './tools/notes.tools.js';
@@ -38,35 +38,36 @@ export default function createStatelessServer({
     version: '1.0.0',
   });
 
-  // Set credentials for lazy initialization (don't initialize clients yet)
-  const {
-    NEXTCLOUD_HOST,
-    NEXTCLOUD_USERNAME,
-    NEXTCLOUD_PASSWORD,
-  } = process.env;
+  // Set credentials from config (never fall back to env vars in this mode)
+  const host = config.nextcloudHost;
+  const username = config.nextcloudUsername;
+  const password = config.nextcloudPassword;
+  const defaultClientSet = createClientSet(host, username, password);
 
-  // Use config values or fall back to environment variables
-  const host = config.nextcloudHost || NEXTCLOUD_HOST;
-  const username = config.nextcloudUsername || NEXTCLOUD_USERNAME;
-  const password = config.nextcloudPassword || NEXTCLOUD_PASSWORD;
+  // Wrap tool handlers so each server instance gets its own isolated client context.
+  const registrationServer = Object.create(server) as McpServer;
+  const originalTool = server.tool.bind(server);
+  registrationServer.tool = ((name: string, description: string, paramsSchema: any, handler: any) => {
+    return originalTool(name, description, paramsSchema, async (args: unknown, extra: unknown) => {
+      return runWithClients(defaultClientSet, () => Promise.resolve(handler(args, extra)));
+    });
+  }) as typeof server.tool;
 
-  // Only set credentials if they exist, don't throw error during server initialization
-  if (host && username && password) {
-    setCredentials(host, username, password);
-  }
-
-  // Register all tool sets
+  // Register all tool sets (skip debug tools in production)
   const toolSets: ToolRegistrationFn[] = [
     registerNotesTools,
     registerCalendarTools,
-    registerCalendarDebugTools,
     registerContactsTools,
     registerTablesTools,
     registerWebDAVTools,
   ];
 
+  if (process.env.NODE_ENV !== 'production') {
+    toolSets.push(registerCalendarDebugTools);
+  }
+
   // Register all tools
-  toolSets.forEach((toolSet) => toolSet(server));
+  toolSets.forEach((toolSet) => toolSet(registrationServer));
 
   // Register a simple hello tool for testing
   server.tool(
