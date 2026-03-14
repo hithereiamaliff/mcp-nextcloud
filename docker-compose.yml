@@ -17,6 +17,8 @@ services:
       - KEY_SERVICE_URL=${KEY_SERVICE_URL:-}
       - KEY_SERVICE_TOKEN=${KEY_SERVICE_TOKEN:-}
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-https://smithery.ai,https://claude.ai}
+      - MCP_TRACE_HTTP=${MCP_TRACE_HTTP:-false}
+      - ENABLE_MCP_DIAGNOSTICS=${ENABLE_MCP_DIAGNOSTICS:-false}
     volumes:
       - analytics-data:/app/data
     healthcheck:
