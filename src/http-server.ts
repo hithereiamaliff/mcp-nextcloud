@@ -43,6 +43,8 @@ const PORT = parseInt(process.env.PORT || '8080', 10);
 const HOST = process.env.HOST || '0.0.0.0';
 const ANALYTICS_FILE = process.env.ANALYTICS_FILE || '/app/data/nextcloud-mcp-analytics.json';
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const ENABLE_MCP_DIAGNOSTICS = /^(1|true|yes|on)$/i.test(process.env.ENABLE_MCP_DIAGNOSTICS || '');
+const MCP_TRACE_HTTP = ENABLE_MCP_DIAGNOSTICS || /^(1|true|yes|on)$/i.test(process.env.MCP_TRACE_HTTP || '');
 
 // API key for protecting endpoints (used in self-hosted mode and for analytics)
 const MCP_API_KEY = process.env.MCP_API_KEY;
@@ -66,6 +68,92 @@ const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
 // Hash an IP address for analytics (privacy-preserving)
 function hashIp(ip: string): string {
   return crypto.createHash('sha256').update(ip).digest('hex').substring(0, 12);
+}
+
+function maskSecret(value: string | undefined | null, visiblePrefix = 10, visibleSuffix = 4): string {
+  if (!value) {
+    return 'missing';
+  }
+
+  if (value.length <= visiblePrefix + visibleSuffix) {
+    return `${value.substring(0, Math.max(1, value.length - 2))}..`;
+  }
+
+  return `${value.substring(0, visiblePrefix)}...${value.substring(value.length - visibleSuffix)}`;
+}
+
+function sanitizeUrlForLogs(url: string): string {
+  let sanitized = url.replace(
+    /\/mcp\/(usr_[A-Za-z0-9]+)/g,
+    (_match, apiKey: string) => `/mcp/${maskSecret(apiKey)}`
+  );
+
+  sanitized = sanitized.replace(
+    /([?&]api_key=)(usr_[^&]+)/g,
+    (_match, prefix: string, apiKey: string) => `${prefix}${maskSecret(apiKey)}`
+  );
+
+  return sanitized;
+}
+
+function shouldTraceHttpRequest(req: Request): boolean {
+  return req.path.startsWith('/mcp') || req.path.startsWith('/.well-known/') || req.path.startsWith('/mcp-debug/');
+}
+
+function selectRequestHeadersForLog(req: Request): Record<string, string> {
+  const headers: Record<string, string> = {};
+  const entries: Array<[string, string | undefined]> = [
+    ['origin', req.get('origin') || undefined],
+    ['user-agent', req.get('user-agent') || undefined],
+    ['accept', req.get('accept') || undefined],
+    ['content-type', req.get('content-type') || undefined],
+    ['content-length', req.get('content-length') || undefined],
+    ['mcp-protocol-version', req.get('mcp-protocol-version') || undefined],
+    ['mcp-session-id', req.get('mcp-session-id') ? 'present' : undefined],
+    ['authorization', req.get('authorization') ? 'present' : undefined],
+    ['x-api-key', req.get('x-api-key') ? 'present' : undefined],
+  ];
+
+  for (const [key, value] of entries) {
+    if (value) {
+      headers[key] = value;
+    }
+  }
+
+  return headers;
+}
+
+function selectResponseHeadersForLog(res: Response): Record<string, string> {
+  const headers: Record<string, string> = {};
+  const entries: Array<[string, string | string[] | number | undefined]> = [
+    ['content-type', res.getHeader('content-type') as string | undefined],
+    ['content-length', res.getHeader('content-length') as string | number | undefined],
+    ['cache-control', res.getHeader('cache-control') as string | undefined],
+    ['www-authenticate', res.getHeader('www-authenticate') as string | undefined],
+    ['mcp-session-id', res.getHeader('mcp-session-id') ? 'present' : undefined],
+    ['location', res.getHeader('location') as string | undefined],
+    ['allow', res.getHeader('allow') as string | undefined],
+    ['access-control-allow-origin', res.getHeader('access-control-allow-origin') as string | undefined],
+  ];
+
+  for (const [key, value] of entries) {
+    if (value === undefined) {
+      continue;
+    }
+
+    if (Array.isArray(value)) {
+      headers[key] = value.join(', ');
+    } else {
+      headers[key] = String(value);
+    }
+  }
+
+  return headers;
+}
+
+function logAuthOutcome(source: 'path' | 'query' | 'self-hosted', outcome: string, details?: Record<string, string | number | boolean>): void {
+  const payload = details ? ` ${JSON.stringify(details)}` : '';
+  console.log(`[${new Date().toISOString()}] MCP auth [${source}] ${outcome}${payload}`);
 }
 
 // Analytics tracking
@@ -287,6 +375,36 @@ function createHttpMcpServer(clientSet: ClientSet): McpServer {
   return server;
 }
 
+function createDiagnosticMcpServer(): McpServer {
+  const server = new McpServer({
+    name: 'Nextcloud MCP Diagnostics',
+    version: '1.0.0',
+  });
+
+  server.tool(
+    prefixToolName('diagnostics_ping'),
+    'Minimal unauthenticated MCP tool for transport and connector troubleshooting',
+    {},
+    async () => {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              message: 'Nextcloud MCP diagnostics endpoint is reachable.',
+              timestamp: new Date().toISOString(),
+              authentication: 'none',
+              diagnosticsEnabled: true,
+            }, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  return server;
+}
+
 // Create Express app
 const app = express();
 
@@ -301,16 +419,82 @@ app.use(cors({
     }
   },
   methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Accept', 'Authorization', 'Mcp-Session-Id', 'X-API-Key', 'X-Nextcloud-Host', 'X-Nextcloud-Username', 'X-Nextcloud-Password'],
+  allowedHeaders: [
+    'Content-Type',
+    'Accept',
+    'Authorization',
+    'Mcp-Session-Id',
+    'MCP-Protocol-Version',
+    'Last-Event-ID',
+    'X-API-Key',
+    'X-Nextcloud-Host',
+    'X-Nextcloud-Username',
+    'X-Nextcloud-Password',
+  ],
   exposedHeaders: ['Mcp-Session-Id'],
 }));
 
+// Request logging with sanitized URLs and finish-time response metadata.
+app.use((req: Request, res: Response, next) => {
+  const startedAt = Date.now();
+  const sanitizedUrl = sanitizeUrlForLogs(req.originalUrl);
+  const shouldTrace = shouldTraceHttpRequest(req);
+
+  console.log(`[${new Date().toISOString()}] ${req.method} ${sanitizedUrl}`);
+
+  if (MCP_TRACE_HTTP && shouldTrace) {
+    console.log(`[${new Date().toISOString()}] Request headers ${JSON.stringify(selectRequestHeadersForLog(req))}`);
+  }
+
+  res.on('finish', () => {
+    if (!shouldTrace) {
+      return;
+    }
+
+    console.log(
+      `[${new Date().toISOString()}] ${req.method} ${sanitizedUrl} -> ${res.statusCode} (${Date.now() - startedAt}ms)`
+    );
+
+    if (MCP_TRACE_HTTP || res.statusCode >= 400) {
+      console.log(`[${new Date().toISOString()}] Response headers ${JSON.stringify(selectResponseHeadersForLog(res))}`);
+    }
+  });
+
+  next();
+});
+
 app.use(express.json());
 
-// Request logging (all incoming requests)
-app.use((req: Request, _res: Response, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
-  next();
+app.use((error: Error & { status?: number; type?: string }, req: Request, res: Response, next: NextFunction) => {
+  if (res.headersSent) {
+    next(error);
+    return;
+  }
+
+  const sanitizedUrl = sanitizeUrlForLogs(req.originalUrl || req.url);
+
+  if (error.type === 'entity.parse.failed' || error instanceof SyntaxError) {
+    console.warn(`[${new Date().toISOString()}] Invalid JSON body for ${req.method} ${sanitizedUrl}: ${error.message}`);
+    res.status(400).json({
+      jsonrpc: '2.0',
+      error: {
+        code: -32700,
+        message: 'Invalid JSON request body.',
+      },
+      id: null,
+    });
+    return;
+  }
+
+  console.error(`[${new Date().toISOString()}] HTTP middleware error for ${req.method} ${sanitizedUrl}:`, error);
+  res.status(error.status || 500).json({
+    jsonrpc: '2.0',
+    error: {
+      code: -32603,
+      message: 'HTTP middleware error.',
+    },
+    id: null,
+  });
 });
 
 // Health check endpoint (no auth required - used by Docker healthcheck)
@@ -750,20 +934,23 @@ app.get('/analytics/dashboard', (req: Request, res: Response) => {
   res.send(html);
 });
 
-// Shared handler for MCP requests once credentials are resolved
-async function handleMcpRequest(
-  req: Request,
-  res: Response,
-  credentials: { host: string; username: string; password: string }
-) {
-  // Track tool calls
-  if (req.body?.method === 'tools/call' && req.body?.params?.name) {
-    trackToolCall(req.body.params.name);
-  }
+// Explicitly advertise that this deployment does not expose OAuth metadata.
+// This keeps auth discovery deterministic when the MCP server is mounted under a subpath.
+function handleNoOAuthMetadata(req: Request, res: Response): void {
+  trackRequest(req, '/.well-known');
+  res.setHeader('Cache-Control', 'no-store');
+  res.status(404).json({
+    supported: false,
+    authentication: 'none',
+    message: 'This MCP deployment does not advertise OAuth metadata.',
+    path: req.path,
+  });
+}
 
-  // Create per-request client set and run within isolated context
-  const clientSet = createClientSet(credentials.host, credentials.username, credentials.password);
-  const server = createHttpMcpServer(clientSet);
+app.all(/^\/\.well-known\/oauth-protected-resource(?:\/.*)?$/, handleNoOAuthMetadata);
+app.all(/^\/\.well-known\/oauth-authorization-server(?:\/.*)?$/, handleNoOAuthMetadata);
+
+async function handleServerRequest(req: Request, res: Response, server: McpServer): Promise<void> {
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
   });
@@ -800,11 +987,29 @@ async function handleMcpRequest(
   }
 }
 
+// Shared handler for MCP requests once credentials are resolved
+async function handleMcpRequest(
+  req: Request,
+  res: Response,
+  credentials: { host: string; username: string; password: string }
+) {
+  // Track tool calls
+  if (req.body?.method === 'tools/call' && req.body?.params?.name) {
+    trackToolCall(req.body.params.name);
+  }
+
+  // Create per-request client set and run within isolated context
+  const clientSet = createClientSet(credentials.host, credentials.username, credentials.password);
+  const server = createHttpMcpServer(clientSet);
+  await handleServerRequest(req, res, server);
+}
+
 // MCP endpoint with API key in URL path (for clients like Claude.ai that don't support header/query auth)
 app.all('/mcp/:apiKey', async (req: Request, res: Response) => {
   trackRequest(req, '/mcp');
 
   if (!isKeyServiceEnabled()) {
+    logAuthOutcome('path', 'key_service_disabled');
     res.status(404).json({
       jsonrpc: '2.0',
       error: { code: -32600, message: 'Path-based auth requires Key Service mode.' },
@@ -815,6 +1020,10 @@ app.all('/mcp/:apiKey', async (req: Request, res: Response) => {
 
   const result = await resolveKeyCredentials(req.params.apiKey);
   if (!result.ok) {
+    logAuthOutcome('path', result.reason, {
+      apiKey: maskSecret(req.params.apiKey),
+      method: req.method,
+    });
     const status = result.reason === 'invalid_key' ? 403 : 503;
     const message = result.reason === 'service_unavailable'
       ? 'Authentication service temporarily unavailable. Try again later.'
@@ -827,6 +1036,13 @@ app.all('/mcp/:apiKey', async (req: Request, res: Response) => {
       id: null,
     });
     return;
+  }
+
+  if (MCP_TRACE_HTTP) {
+    logAuthOutcome('path', 'resolved', {
+      apiKey: maskSecret(req.params.apiKey),
+      method: req.method,
+    });
   }
 
   await handleMcpRequest(req, res, result.credentials);
@@ -843,6 +1059,9 @@ app.all('/mcp', async (req: Request, res: Response) => {
   if (isKeyServiceEnabled()) {
     // --- Key Service Mode ---
     if (!apiKey) {
+      logAuthOutcome('query', 'missing_api_key', {
+        method: req.method,
+      });
       res.status(403).json({
         jsonrpc: '2.0',
         error: { code: -32600, message: 'Missing api_key parameter.' },
@@ -853,6 +1072,10 @@ app.all('/mcp', async (req: Request, res: Response) => {
 
     const result = await resolveKeyCredentials(apiKey);
     if (!result.ok) {
+      logAuthOutcome('query', result.reason, {
+        apiKey: maskSecret(apiKey),
+        method: req.method,
+      });
       const status = result.reason === 'invalid_key' ? 403 : 503;
       const message = result.reason === 'service_unavailable'
         ? 'Authentication service temporarily unavailable. Try again later.'
@@ -867,10 +1090,20 @@ app.all('/mcp', async (req: Request, res: Response) => {
       return;
     }
 
+    if (MCP_TRACE_HTTP) {
+      logAuthOutcome('query', 'resolved', {
+        apiKey: maskSecret(apiKey),
+        method: req.method,
+      });
+    }
+
     credentials = result.credentials;
   } else {
     // --- Self-Hosted Mode ---
     if (!validateApiKey(req)) {
+      logAuthOutcome('self-hosted', 'invalid_server_api_key', {
+        method: req.method,
+      });
       res.status(403).json({
         jsonrpc: '2.0',
         error: {
@@ -884,6 +1117,9 @@ app.all('/mcp', async (req: Request, res: Response) => {
 
     credentials = extractCredentials(req);
     if (!credentials) {
+      logAuthOutcome('self-hosted', 'missing_nextcloud_headers', {
+        method: req.method,
+      });
       res.status(401).json({
         jsonrpc: '2.0',
         error: {
@@ -898,6 +1134,13 @@ app.all('/mcp', async (req: Request, res: Response) => {
 
   await handleMcpRequest(req, res, credentials);
 });
+
+if (ENABLE_MCP_DIAGNOSTICS) {
+  app.all('/mcp-debug/open', async (req: Request, res: Response) => {
+    trackRequest(req, '/mcp-debug/open');
+    await handleServerRequest(req, res, createDiagnosticMcpServer());
+  });
+}
 
 // Root endpoint with server info (no credentials or sensitive data exposed)
 app.get('/', (req: Request, res: Response) => {
@@ -917,8 +1160,8 @@ app.get('/', (req: Request, res: Response) => {
           mode: 'key-service',
           description: 'Provide a user API key. Credentials are resolved via the MCP Key Service.',
           options: {
-            path: '/mcp/usr_XXXXXXXX (recommended for Claude.ai)',
-            queryParam: '/mcp?api_key=usr_XXXXXXXX',
+            queryParam: '/mcp?api_key=usr_XXXXXXXX (recommended for Claude.ai)',
+            path: '/mcp/usr_XXXXXXXX (path fallback for clients that cannot preserve query params)',
             header: 'X-API-Key: usr_XXXXXXXX',
           },
         }
@@ -933,6 +1176,11 @@ app.get('/', (req: Request, res: Response) => {
           },
         },
     documentation: 'https://github.com/hithereiamaliff/mcp-nextcloud',
+    diagnostics: ENABLE_MCP_DIAGNOSTICS
+      ? {
+          open_mcp: '/mcp-debug/open',
+        }
+      : undefined,
   });
 });
 
@@ -949,6 +1197,8 @@ app.listen(PORT, HOST, () => {
   } else {
     console.log(`Auth mode: Self-hosted (MCP_API_KEY: ${MCP_API_KEY ? 'configured' : 'NOT SET'})`);
   }
+  console.log(`HTTP trace logging: ${MCP_TRACE_HTTP ? 'enabled' : 'disabled'}`);
+  console.log(`Diagnostics endpoint: ${ENABLE_MCP_DIAGNOSTICS ? '/mcp-debug/open' : 'disabled'}`);
   console.log(`Debug tools: ${IS_PRODUCTION ? 'disabled (production)' : 'enabled (development)'}`);
   console.log('='.repeat(60));
   console.log('');
