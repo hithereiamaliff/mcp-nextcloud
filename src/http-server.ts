@@ -44,6 +44,7 @@ const HOST = process.env.HOST || '0.0.0.0';
 const ANALYTICS_FILE = process.env.ANALYTICS_FILE || '/app/data/nextcloud-mcp-analytics.json';
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 const ENABLE_MCP_DIAGNOSTICS = /^(1|true|yes|on)$/i.test(process.env.ENABLE_MCP_DIAGNOSTICS || '');
+const ENABLE_SMITHERY_ENDPOINT = /^(1|true|yes|on)$/i.test(process.env.ENABLE_SMITHERY_ENDPOINT || '');
 const MCP_TRACE_HTTP = ENABLE_MCP_DIAGNOSTICS || /^(1|true|yes|on)$/i.test(process.env.MCP_TRACE_HTTP || '');
 
 // API key for protecting endpoints (used in self-hosted mode and for analytics)
@@ -97,7 +98,10 @@ function sanitizeUrlForLogs(url: string): string {
 }
 
 function shouldTraceHttpRequest(req: Request): boolean {
-  return req.path.startsWith('/mcp') || req.path.startsWith('/.well-known/') || req.path.startsWith('/mcp-debug/');
+  return req.path.startsWith('/mcp')
+    || req.path.startsWith('/smithery/')
+    || req.path.startsWith('/.well-known/')
+    || req.path.startsWith('/mcp-debug/');
 }
 
 function selectRequestHeadersForLog(req: Request): Record<string, string> {
@@ -151,7 +155,11 @@ function selectResponseHeadersForLog(res: Response): Record<string, string> {
   return headers;
 }
 
-function logAuthOutcome(source: 'path' | 'query' | 'self-hosted', outcome: string, details?: Record<string, string | number | boolean>): void {
+function logAuthOutcome(
+  source: 'path' | 'query' | 'self-hosted' | 'smithery',
+  outcome: string,
+  details?: Record<string, string | number | boolean>
+): void {
   const payload = details ? ` ${JSON.stringify(details)}` : '';
   console.log(`[${new Date().toISOString()}] MCP auth [${source}] ${outcome}${payload}`);
 }
@@ -1010,6 +1018,17 @@ async function handleMcpRequest(
   await handleServerRequest(req, res, server);
 }
 
+function sendMissingCredentialsResponse(res: Response): void {
+  res.status(401).json({
+    jsonrpc: '2.0',
+    error: {
+      code: -32600,
+      message: 'Missing Nextcloud credentials. Provide X-Nextcloud-Host, X-Nextcloud-Username, and X-Nextcloud-Password headers.',
+    },
+    id: null,
+  });
+}
+
 // MCP endpoint with API key in URL path (for clients like Claude.ai that don't support header/query auth)
 app.all('/mcp/:apiKey', async (req: Request, res: Response) => {
   trackRequest(req, '/mcp');
@@ -1126,20 +1145,36 @@ app.all('/mcp', async (req: Request, res: Response) => {
       logAuthOutcome('self-hosted', 'missing_nextcloud_headers', {
         method: req.method,
       });
-      res.status(401).json({
-        jsonrpc: '2.0',
-        error: {
-          code: -32600,
-          message: 'Missing Nextcloud credentials. Provide X-Nextcloud-Host, X-Nextcloud-Username, and X-Nextcloud-Password headers.',
-        },
-        id: null,
-      });
+      sendMissingCredentialsResponse(res);
       return;
     }
   }
 
   await handleMcpRequest(req, res, credentials);
 });
+
+if (ENABLE_SMITHERY_ENDPOINT) {
+  app.all('/smithery/mcp', async (req: Request, res: Response) => {
+    trackRequest(req, '/smithery/mcp');
+
+    const credentials = extractCredentials(req);
+    if (!credentials) {
+      logAuthOutcome('smithery', 'missing_nextcloud_headers', {
+        method: req.method,
+      });
+      sendMissingCredentialsResponse(res);
+      return;
+    }
+
+    if (MCP_TRACE_HTTP) {
+      logAuthOutcome('smithery', 'resolved', {
+        method: req.method,
+      });
+    }
+
+    await handleMcpRequest(req, res, credentials);
+  });
+}
 
 if (ENABLE_MCP_DIAGNOSTICS) {
   app.all('/mcp-debug/open', async (req: Request, res: Response) => {
@@ -1159,6 +1194,7 @@ app.get('/', (req: Request, res: Response) => {
     endpoints: {
       mcp: '/mcp',
       mcp_with_key: '/mcp/:apiKey (for clients that cannot send headers or query params)',
+      smithery_mcp: ENABLE_SMITHERY_ENDPOINT ? '/smithery/mcp (header-based direct credentials for Smithery)' : undefined,
       health: '/health',
     },
     authentication: isKeyServiceEnabled()
@@ -1204,6 +1240,7 @@ app.listen(PORT, HOST, () => {
     console.log(`Auth mode: Self-hosted (MCP_API_KEY: ${MCP_API_KEY ? 'configured' : 'NOT SET'})`);
   }
   console.log(`HTTP trace logging: ${MCP_TRACE_HTTP ? 'enabled' : 'disabled'}`);
+  console.log(`Smithery endpoint: ${ENABLE_SMITHERY_ENDPOINT ? '/smithery/mcp' : 'disabled'}`);
   console.log(`Diagnostics endpoint: ${ENABLE_MCP_DIAGNOSTICS ? '/mcp-debug/open' : 'disabled'}`);
   console.log(`Debug tools: ${IS_PRODUCTION ? 'disabled (production)' : 'enabled (development)'}`);
   console.log('='.repeat(60));

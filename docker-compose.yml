@@ -19,6 +19,7 @@ services:
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-https://smithery.ai,https://claude.ai}
       - MCP_TRACE_HTTP=${MCP_TRACE_HTTP:-false}
       - ENABLE_MCP_DIAGNOSTICS=${ENABLE_MCP_DIAGNOSTICS:-false}
+      - ENABLE_SMITHERY_ENDPOINT=${ENABLE_SMITHERY_ENDPOINT:-false}
     volumes:
       - analytics-data:/app/data
     healthcheck:

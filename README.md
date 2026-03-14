@@ -376,6 +376,9 @@ ALLOWED_ORIGINS=https://smithery.ai,https://claude.ai
 # These are intended for temporary troubleshooting in hosted HTTP mode.
 MCP_TRACE_HTTP=false
 ENABLE_MCP_DIAGNOSTICS=false
+
+# Optional dedicated endpoint for Smithery URL publishing.
+ENABLE_SMITHERY_ENDPOINT=false
 ```
 
 **Important Security Notes:**
@@ -386,7 +389,13 @@ ENABLE_MCP_DIAGNOSTICS=false
 ### Smithery Configuration
 
 When deploying via Smithery, you can configure credentials through:
-- Smithery configuration interface (recommended for cloud deployment)
+- Smithery's configuration interface for URL-published servers
+
+For Smithery, the recommended model is:
+
+- users enter `nextcloudHost`, `nextcloudUsername`, and `nextcloudPassword` directly
+- Smithery forwards those values to the dedicated `/smithery/mcp` endpoint as headers
+- the hosted `usr_...` key-service flow remains separate and continues to use `/mcp/usr_...`
 
 ## Deployment & Usage
 
@@ -477,11 +486,13 @@ npm run start:http
    KEY_SERVICE_URL=https://mcpkeys.techmavie.digital/internal/resolve
    KEY_SERVICE_TOKEN=your-key-service-bearer-token
    ALLOWED_ORIGINS=https://smithery.ai,https://claude.ai
+   ENABLE_SMITHERY_ENDPOINT=false
    ```
    Notes:
    - Use `KEY_SERVICE_URL` + `KEY_SERVICE_TOKEN` only if you want hosted-style `usr_...` key resolution.
    - Users obtain and manage those keys at `https://mcpkeys.techmavie.digital`.
    - The MCP server itself should keep using the resolver endpoint path, not the portal homepage.
+   - Set `ENABLE_SMITHERY_ENDPOINT=true` only if you want to publish the dedicated Smithery direct-credentials endpoint.
 3. Start the container:
    ```bash
    docker compose up -d --build
@@ -516,12 +527,54 @@ mcp-nextcloud
 
 ### Option 4: Smithery Deployment
 
-For cloud deployment via Smithery:
+For Smithery's current URL-published model, use a dedicated endpoint that accepts direct Nextcloud credentials via headers:
 
 ```bash
-npm run dev    # Local development with Smithery playground
-npm run deploy # Deploy to Smithery cloud
+# Enable the Smithery endpoint on your hosted server
+ENABLE_SMITHERY_ENDPOINT=true
 ```
+
+Use this public MCP URL in Smithery:
+
+```text
+https://mcp.techmavie.digital/nextcloud/smithery/mcp
+```
+
+Recommended Smithery config schema for this server:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "nextcloudHost": {
+      "type": "string",
+      "title": "Nextcloud Host",
+      "description": "Nextcloud server URL (for example https://cloud.example.com)",
+      "x-from": { "header": "X-Nextcloud-Host" }
+    },
+    "nextcloudUsername": {
+      "type": "string",
+      "title": "Nextcloud Username",
+      "x-from": { "header": "X-Nextcloud-Username" }
+    },
+    "nextcloudPassword": {
+      "type": "string",
+      "title": "Nextcloud App Password",
+      "format": "password",
+      "x-from": { "header": "X-Nextcloud-Password" }
+    }
+  },
+  "required": ["nextcloudHost", "nextcloudUsername", "nextcloudPassword"]
+}
+```
+
+Why this split is recommended:
+
+- Smithery users can connect directly without creating an MCP Key Service key first
+- the hosted `usr_...` connector flow remains unchanged for Claude.ai and other hosted clients
+- the Smithery path is isolated to `/smithery/mcp`, so it does not interfere with `/mcp` or `/mcp/usr_...`
+
+> **Important:** The Smithery endpoint is designed for direct credentials via headers. It does not use the MCP Key Service and does not require the shared `MCP_API_KEY`.
 
 ## Publishing to npm
 
